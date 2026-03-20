@@ -322,6 +322,7 @@ async function handleAddPerson(e) {
     });
     document.getElementById('form-add-person').reset();
     toast('Person added!', 'success');
+    logActivity('add_person', { personId: docRef.id, personName: name, gender, dob });
 
     // If there are already other people, prompt to link
     if (graphData.nodes.length > 0) {
@@ -417,6 +418,9 @@ async function handleQuickLink() {
 
     await batch.commit();
     toast('Relationship linked! ✓', 'success');
+    const p1n = nodeById.get(p1Id)?.name || p1Id;
+    const p2n = nodeById.get(p2Id)?.name || p2Id;
+    logActivity('add_relationship', { person1Id: p1Id, person1Name: p1n, person2Id: p2Id, person2Name: p2n, relationshipType: type, source: 'quick-link' });
     closeQuickLinkModal();
   } catch (err) {
     toast('Error: ' + err.message, 'error');
@@ -477,6 +481,9 @@ async function handleAddRelationship(e) {
     await batch.commit();
     document.getElementById('form-add-rel').reset();
     toast(conflict ? '⚠️ Relationship added (conflict flagged).' : 'Relationship added!', conflict ? '' : 'success');
+    const p1n = nodeById.get(p1Id)?.name || p1Id;
+    const p2n = nodeById.get(p2Id)?.name || p2Id;
+    logActivity('add_relationship', { person1Id: p1Id, person1Name: p1n, person2Id: p2Id, person2Name: p2n, relationshipType: type, conflicted: conflict });
   } catch (err) {
     toast('Error: ' + err.message, 'error');
   }
@@ -970,11 +977,13 @@ function zoomOut()  { svgSel.transition().duration(300).call(zoomBehaviour.scale
 function resetZoom(){ svgSel.transition().duration(400).call(zoomBehaviour.transform, d3.zoomIdentity); }
 
 /* ════════════════════════════════════════════════════════════
-   9b. REARRANGE – smart uncluttered layout
-   ─ Detects disconnected family groups (components)
-   ─ Assigns generation rows via BFS (parents above children)
-   ─ Places spouses side-by-side, siblings clustered
-   ─ Seeds positions, then lets simulation fine-tune
+   9b. REARRANGE – medical pedigree chart layout
+   ─ Strict generational rows (grandparents top, children bottom)
+   ─ Couples placed side-by-side
+   ─ Children centered below the midpoint of their parents
+   ─ Sibling groups never overlap
+   ─ Disconnected families laid out as separate columns
+   ─ All positions are pinned (fx/fy) – simulation does NOT fight layout
 ════════════════════════════════════════════════════════════ */
 
 function rearrangeChart() {
@@ -982,164 +991,226 @@ function rearrangeChart() {
   const links = graphData.links;
   if (!nodes.length) { toast('Nothing to rearrange', 'error'); return; }
 
-  // Show spinner on button
   const btn = document.getElementById('rearrange-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rearranging…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Laying out…'; }
 
-  // ── 1. Build relationship maps (non-reverse links only) ──
+  // ── Constants ──────────────────────────────────────────────
+  const HGAP = 140;   // minimum horizontal spacing between node centres
+  const VGAP = 200;   // vertical spacing between generations
+  const CGAP = 280;   // extra gap between disconnected family groups
+
+  // ── 1. Build relationship maps (non-reverse only) ──────────
   const childrenOf = new Map(nodes.map(n => [n.id, new Set()]));
   const parentsOf  = new Map(nodes.map(n => [n.id, new Set()]));
   const spousesOf  = new Map(nodes.map(n => [n.id, new Set()]));
-  const adj        = new Map(nodes.map(n => [n.id, new Set()]));
+  const adjAny     = new Map(nodes.map(n => [n.id, new Set()]));
 
-  links.forEach(l => {
-    const { person1Id: a, person2Id: b, relationshipType: t, isReverse } = l;
-    if (isReverse) return;
-    adj.get(a)?.add(b); adj.get(b)?.add(a);
-    if (t === 'parent') {
-      childrenOf.get(a)?.add(b);
-      parentsOf.get(b)?.add(a);
-    } else if (t === 'child') {
-      parentsOf.get(a)?.add(b);
-      childrenOf.get(b)?.add(a);
-    } else if (t === 'spouse') {
-      spousesOf.get(a)?.add(b);
-      spousesOf.get(b)?.add(a);
-    }
+  links.filter(l => !l.isReverse).forEach(({ person1Id: a, person2Id: b, relationshipType: t }) => {
+    adjAny.get(a)?.add(b); adjAny.get(b)?.add(a);
+    if      (t === 'parent') { childrenOf.get(a)?.add(b); parentsOf.get(b)?.add(a); }
+    else if (t === 'child')  { childrenOf.get(b)?.add(a); parentsOf.get(a)?.add(b); }
+    else if (t === 'spouse') { spousesOf.get(a)?.add(b);  spousesOf.get(b)?.add(a); }
   });
 
-  // ── 2. Find connected components (BFS over any link type) ──
+  // ── 2. Generation levels via iterative BFS ─────────────────
+  const level = new Map();
+
+  function assignLevels(startId, startLv) {
+    const q = [{ id: startId, lv: startLv }];
+    while (q.length) {
+      const { id, lv } = q.shift();
+      if (level.has(id) && level.get(id) <= lv) continue;
+      level.set(id, lv);
+      childrenOf.get(id)?.forEach(c => q.push({ id: c, lv: lv + 1 }));
+    }
+  }
+
+  nodes.forEach(n => { if (!parentsOf.get(n.id)?.size) assignLevels(n.id, 0); });
+  nodes.forEach(n => { if (!level.has(n.id))            assignLevels(n.id, 0); });
+
+  // Normalise so min level == 0
+  const minLv = Math.min(...level.values());
+  nodes.forEach(n => level.set(n.id, level.get(n.id) - minLv));
+
+  // ── 3. Connected components ────────────────────────────────
   const visited    = new Set();
   const components = [];
-
   nodes.forEach(n => {
     if (visited.has(n.id)) return;
-    const comp = [];
-    const stack = [n.id];
+    const comp = [], stack = [n.id];
     while (stack.length) {
       const id = stack.pop();
       if (visited.has(id)) continue;
       visited.add(id); comp.push(id);
-      adj.get(id)?.forEach(nb => { if (!visited.has(nb)) stack.push(nb); });
+      adjAny.get(id)?.forEach(nb => { if (!visited.has(nb)) stack.push(nb); });
     }
     components.push(comp);
   });
 
-  // ── 3. Assign generation levels within each component ──
-  const level = new Map();
-
-  components.forEach(compIds => {
-    const compSet = new Set(compIds);
-    const compParents  = id => [...(parentsOf.get(id)  || [])].filter(p => compSet.has(p));
-    const compChildren = id => [...(childrenOf.get(id) || [])].filter(c => compSet.has(c));
-
-    // BFS from roots (nodes with no parents in this component)
-    const roots = compIds.filter(id => compParents(id).length === 0);
-    const seeds = roots.length ? roots : [compIds[0]];
-
-    const q = seeds.map(id => ({ id, lv: 0 }));
-    const local = new Map();
-
-    while (q.length) {
-      const { id, lv } = q.shift();
-      if (local.has(id) && local.get(id) <= lv) continue;
-      local.set(id, lv);
-      compChildren(id).forEach(cid => q.push({ id: cid, lv: lv + 1 }));
-      compParents(id).forEach(pid => { if (!local.has(pid)) q.push({ id: pid, lv: lv - 1 }); });
-    }
-
-    // Any still-unassigned (e.g. only spouse links) → same level as nearest assigned neighbour
-    compIds.forEach(id => {
-      if (!local.has(id)) {
-        const nb = [...(adj.get(id) || [])].find(n => local.has(n));
-        local.set(id, nb != null ? local.get(nb) : 0);
-      }
+  // ── 4. Build nuclear family map ────────────────────────────
+  // family key = sorted parent IDs → { parents, children }
+  function buildFamilyMap(compSet) {
+    const fm = new Map();
+    compSet.forEach(childId => {
+      const pars = [...(parentsOf.get(childId) || [])].filter(p => compSet.has(p)).sort();
+      if (!pars.length) return;
+      const key = pars.join('|');
+      if (!fm.has(key)) fm.set(key, { parents: pars, children: [] });
+      fm.get(key).children.push(childId);
     });
+    return fm;
+  }
 
-    // Normalise so min level == 0
-    const minLv = Math.min(...local.values());
-    compIds.forEach(id => level.set(id, local.get(id) - minLv));
-  });
+  // ── 5. Helper: order a list of IDs so spouses are adjacent ─
+  function coupleSort(ids) {
+    const result = [], placed = new Set();
+    ids.forEach(id => {
+      if (placed.has(id)) return;
+      result.push(id); placed.add(id);
+      spousesOf.get(id)?.forEach(sid => {
+        if (!placed.has(sid) && ids.includes(sid)) { result.push(sid); placed.add(sid); }
+      });
+    });
+    return result;
+  }
 
-  // ── 4. Position nodes ──
-  const HGAP      = 210;  // horizontal spacing between nodes in the same row
-  const VGAP      = 230;  // vertical spacing between generations
-  const COMP_GAP  = 350;  // extra gap between disconnected components
-
-  let compXOffset = 0;
+  // ── 6. Lay out each component independently ────────────────
+  const posX = new Map(), posY = new Map();
+  let compOffset = 0;
 
   components.forEach(compIds => {
-    // Group IDs by generation level
+    const cs = new Set(compIds);
+    const fm = buildFamilyMap(cs);
+
+    // Group by level
     const byLevel = new Map();
     compIds.forEach(id => {
       const lv = level.get(id) ?? 0;
       if (!byLevel.has(lv)) byLevel.set(lv, []);
       byLevel.get(lv).push(id);
     });
+    const levels = [...byLevel.keys()].sort((a, b) => a - b);
 
-    // Sort each level so spouses are adjacent, then siblings are clustered
-    byLevel.forEach((ids, _lv) => {
-      const ordered = [];
-      const placed  = new Set();
+    // ── 6a. Place top generation left-to-right, couples adjacent
+    const topLv      = levels[0];
+    const topOrdered = coupleSort(byLevel.get(topLv) || []);
+    topOrdered.forEach((id, i) => {
+      posX.set(id, i * HGAP);
+      posY.set(id, topLv * VGAP);
+    });
 
-      ids.forEach(id => {
-        if (placed.has(id)) return;
-        ordered.push(id); placed.add(id);
-        // Place spouse immediately after
-        spousesOf.get(id)?.forEach(sid => {
-          if (!placed.has(sid) && ids.includes(sid)) {
-            ordered.push(sid); placed.add(sid);
-          }
+    // ── 6b. Place each subsequent generation
+    for (let li = 1; li < levels.length; li++) {
+      const lv      = levels[li];
+      const lvNodes = byLevel.get(lv) || [];
+
+      // Sort families by their parents' average X (left-to-right ordering)
+      const relevantFams = [...fm.values()]
+        .filter(f =>
+          f.children.some(c => (level.get(c) ?? 0) === lv && cs.has(c)) &&
+          f.parents.every(p => posX.has(p))
+        )
+        .sort((a, b) => _avgX(a.parents, posX) - _avgX(b.parents, posX));
+
+      // Tentative X: centre each sibling group under the parent midpoint
+      const tentX  = new Map();
+      const placed = new Set();
+
+      relevantFams.forEach(fam => {
+        const siblings = coupleSort(
+          fam.children.filter(c => (level.get(c) ?? 0) === lv && cs.has(c))
+        );
+        if (!siblings.length) return;
+
+        const parentMid = _avgX(fam.parents, posX);
+        const totalSpan = (siblings.length - 1) * HGAP;
+        const startX    = parentMid - totalSpan / 2;
+
+        siblings.forEach((id, i) => {
+          tentX.set(id, startX + i * HGAP);
+          placed.add(id);
         });
       });
-      byLevel.set(_lv, ordered);
-    });
 
-    // Width of the widest row in this component
-    const maxCount  = Math.max(...[...byLevel.values()].map(a => a.length));
-    const compWidth = (maxCount - 1) * HGAP;
-
-    // Assign x/y, clear any pinned position
-    byLevel.forEach((ids, lv) => {
-      const count = ids.length;
-      ids.forEach((id, i) => {
-        const node = nodes.find(n => n.id === id);
-        if (!node) return;
-        node.fx = null;
-        node.fy = null;
-        node.vx = 0;
-        node.vy = 0;
-        node.x  = compXOffset + (i - (count - 1) / 2) * HGAP;
-        node.y  = lv * VGAP;
+      // Any orphan nodes at this level (no parents placed yet)
+      let tailX = tentX.size ? Math.max(...tentX.values()) + HGAP : 0;
+      lvNodes.forEach(id => {
+        if (!placed.has(id)) { tentX.set(id, tailX); tailX += HGAP; }
       });
+
+      // ── Resolve overlaps: left-to-right sweep enforces HGAP minimum
+      const byX = [...tentX.entries()].sort((a, b) => a[1] - b[1]);
+      let floor = -Infinity;
+      byX.forEach(([id, tx]) => {
+        const safe = Math.max(tx, floor + HGAP);
+        tentX.set(id, safe);
+        floor = safe;
+      });
+
+      // ── Re-centre sibling groups under parents after overlap resolution
+      relevantFams.forEach(fam => {
+        const siblings = fam.children.filter(c => (level.get(c) ?? 0) === lv && cs.has(c));
+        if (siblings.length < 2) return;
+        const parentMid  = _avgX(fam.parents, posX);
+        const currentMid = _avgX(siblings, tentX);
+        const shift      = parentMid - currentMid;
+        // Only shift right (avoid pushing already-placed nodes left into overlap)
+        if (shift > 1) {
+          // Check no sibling would move left of its left neighbour
+          siblings.forEach(id => tentX.set(id, tentX.get(id) + shift));
+          // Re-run left-to-right overlap fix for safety
+          const byX2 = [...tentX.entries()].sort((a, b) => a[1] - b[1]);
+          let floor2 = -Infinity;
+          byX2.forEach(([id, tx]) => {
+            const safe = Math.max(tx, floor2 + HGAP);
+            tentX.set(id, safe);
+            floor2 = safe;
+          });
+        }
+      });
+
+      tentX.forEach((x, id) => { posX.set(id, x); posY.set(id, lv * VGAP); });
+    }
+
+    // ── 6c. Shift the whole component so leftmost node is at compOffset
+    const compXs = compIds.map(id => posX.get(id) ?? 0);
+    const minCX  = Math.min(...compXs);
+    const maxCX  = Math.max(...compXs);
+
+    compIds.forEach(id => {
+      const node = nodes.find(n => n.id === id);
+      if (!node) return;
+      node.x  = compOffset + (posX.get(id) ?? 0) - minCX;
+      node.y  = posY.get(id) ?? 0;
+      node.fx = node.x;   // PIN: simulation must not move these
+      node.fy = node.y;
+      node.vx = 0; node.vy = 0;
     });
 
-    compXOffset += compWidth + COMP_GAP;
+    compOffset += (maxCX - minCX) + CGAP;
   });
 
-  // Centre the whole layout around origin
-  const allX   = nodes.map(n => n.x);
-  const cx     = (Math.min(...allX) + Math.max(...allX)) / 2;
-  nodes.forEach(n => { n.x -= cx; });
+  // ── 7. Centre the whole layout around x=0 ─────────────────
+  const allX = nodes.map(n => n.x ?? 0);
+  const cx   = (Math.min(...allX) + Math.max(...allX)) / 2;
+  nodes.forEach(n => { n.x -= cx; n.fx = n.x; });
 
-  // ── 5. Fire simulation at high energy to let it fine-tune ──
-  simulation
-    .force('charge',  d3.forceManyBody().strength(-700).distanceMax(900))
-    .force('collide', d3.forceCollide(90))
-    .alpha(0.85)
-    .alphaTarget(0)
-    .restart();
-
-  // After simulation settles, restore normal forces and fit view
+  // ── 8. Apply positions: run simulation at near-zero alpha
+  //       so it respects fx/fy pins without fighting the layout
+  simulation.alpha(0.001).restart();
   setTimeout(() => {
-    simulation
-      .force('charge',  d3.forceManyBody().strength(-600).distanceMax(800))
-      .force('collide', d3.forceCollide(80));
+    simulation.stop();
     fitView();
     if (btn) { btn.disabled = false; btn.innerHTML = '⇄ Rearrange'; }
-  }, 1400);
+  }, 250);
 
-  toast('Rearranging chart… ✨');
+  toast('Laid out as pedigree chart ✨');
+}
+
+/** Average X of an array of node IDs from a posX Map. */
+function _avgX(ids, posX) {
+  if (!ids.length) return 0;
+  return ids.reduce((s, id) => s + (posX.get(id) ?? 0), 0) / ids.length;
 }
 
 /** Fit all nodes into the visible viewport with padding. */
@@ -1326,6 +1397,11 @@ async function deleteSelectedLink() {
     if (reverse) batch.delete(db.collection('relationships').doc(reverse.id));
 
     await batch.commit();
+    logActivity('delete_relationship', {
+      person1Id: link.person1Id, person1Name: p1?.name || link.person1Id,
+      person2Id: link.person2Id, person2Name: p2?.name || link.person2Id,
+      relationshipType: link.relationshipType
+    });
     deselectLink();
     toast('Relationship removed.', 'success');
   } catch (err) {
@@ -1444,6 +1520,12 @@ async function handleEditSave(e) {
 
   if (!name) return;
 
+  // Capture old values for the log before writing
+  const _nodeSnap = nodeById.get(id);
+  const _oldName   = _nodeSnap?.name        || '';
+  const _oldGender = _nodeSnap?.gender      || '';
+  const _oldDob    = _nodeSnap?.dateOfBirth || '';
+
   // Permission guard — re-check on the client before writing
   const node = nodeById.get(id);
   if (node) {
@@ -1465,6 +1547,12 @@ async function handleEditSave(e) {
     });
     closeModal('modal-edit');
     toast('Changes saved!', 'success');
+    logActivity('edit_person', {
+      personId: id, personName: name,
+      oldName: _oldName, newName: name,
+      oldGender: _oldGender, newGender: gender,
+      oldDob: _oldDob, newDob: dob || ''
+    });
   } catch (err) {
     toast('Error: ' + err.message, 'error');
   }
@@ -1491,11 +1579,107 @@ async function deleteSelectedNode() {
       .forEach(l => batch.delete(db.collection('relationships').doc(l.id)));
 
     await batch.commit();
+    logActivity('delete_person', { personId: selectedNodeId, personName: node.name, gender: node.gender });
     closeModal('modal-node');
     deselectNode();
     toast(`"${node.name}" deleted.`);
   } catch (err) {
     toast('Error: ' + err.message, 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   10c. ACTIVITY LOG
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Fire-and-forget helper — writes one entry to the activityLogs collection.
+ * Never blocks or throws; failures are silently warned in the console.
+ *
+ * @param {string} action   – e.g. 'add_person', 'edit_person', 'delete_person',
+ *                            'add_relationship', 'delete_relationship', 'accept_suggestion'
+ * @param {object} details  – arbitrary metadata about the action
+ */
+function logActivity(action, details = {}) {
+  db.collection('activityLogs').add({
+    action,
+    userId:    currentUser.uid,
+    userName:  currentProfile.displayName || currentProfile.name || currentUser.email,
+    userEmail: currentUser.email,
+    role:      currentProfile.role,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    details
+  }).catch(err => console.warn('Activity log write failed:', err));
+}
+
+/** Open the Activity Log modal (admin only). */
+async function openActivityLog() {
+  if (currentProfile.role !== 'admin') return;
+  document.getElementById('modal-activity-log').style.display = 'flex';
+  const body = document.getElementById('activity-log-body');
+  body.innerHTML = '<div class="al-loading">⏳ Loading activity…</div>';
+
+  try {
+    const snap = await db.collection('activityLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(300)
+      .get();
+
+    if (snap.empty) {
+      body.innerHTML = '<div class="al-empty"><span>📭</span><p>No activity recorded yet.</p></div>';
+      return;
+    }
+
+    const ACTION_META = {
+      add_person:          { icon: '➕', label: 'Added person',          color: '#22c55e' },
+      edit_person:         { icon: '✏️', label: 'Edited person',          color: '#3b82f6' },
+      delete_person:       { icon: '🗑', label: 'Deleted person',         color: '#ef4444' },
+      add_relationship:    { icon: '🔗', label: 'Added relationship',     color: '#8b5cf6' },
+      delete_relationship: { icon: '✂️', label: 'Removed relationship',   color: '#f59e0b' },
+      accept_suggestion:   { icon: '💡', label: 'Accepted suggestion',    color: '#0d9488' },
+    };
+
+    body.innerHTML = snap.docs.map(doc => {
+      const d  = doc.data();
+      const ts = d.timestamp?.toDate ? d.timestamp.toDate() : null;
+      const timeStr = ts
+        ? ts.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+        : '—';
+
+      const meta  = ACTION_META[d.action] || { icon: '•', label: d.action, color: '#64748b' };
+      const isAdm = d.role === 'admin';
+
+      // Build detail line
+      const det = d.details || {};
+      let detailParts = [];
+      if (det.personName)     detailParts.push(`<strong>${escapeHtml(det.personName)}</strong>`);
+      if (det.oldName && det.newName && det.oldName !== det.newName)
+        detailParts.push(`<span class="al-change">${escapeHtml(det.oldName)} → ${escapeHtml(det.newName)}</span>`);
+      if (det.person1Name)    detailParts.push(`<strong>${escapeHtml(det.person1Name)}</strong>`);
+      if (det.relationshipType)
+        detailParts.push(`<span class="al-rel-badge">${escapeHtml(det.relationshipType)}</span>`);
+      if (det.person2Name)    detailParts.push(`<strong>${escapeHtml(det.person2Name)}</strong>`);
+      if (det.oldGender && det.newGender && det.oldGender !== det.newGender)
+        detailParts.push(`<span class="al-change">${escapeHtml(det.oldGender)} → ${escapeHtml(det.newGender)}</span>`);
+
+      return `
+        <div class="al-entry">
+          <span class="al-icon" style="background:${meta.color}22;color:${meta.color}">${meta.icon}</span>
+          <div class="al-entry-body">
+            <div class="al-entry-top">
+              <span class="al-action-label" style="color:${meta.color}">${meta.label}</span>
+              ${detailParts.length ? '<span class="al-dot">·</span>' + detailParts.join(' ') : ''}
+            </div>
+            <div class="al-entry-bottom">
+              <span class="al-user-name">${escapeHtml(det.userName || d.userName || d.userEmail)}</span>
+              <span class="al-role-badge ${isAdm ? 'al-role-admin' : 'al-role-user'}">${d.role}</span>
+              <span class="al-time">${timeStr}</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--danger);padding:20px;text-align:center">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -2158,6 +2342,11 @@ async function acceptSuggestion(sugId) {
 
   try {
     await batch.commit();
+    logActivity('accept_suggestion', {
+      person1Id, person1Name: nodeById.get(person1Id)?.name || person1Id,
+      person2Id, person2Name: nodeById.get(person2Id)?.name || person2Id,
+      relationshipType, reason: sug.reason || ''
+    });
     currentSuggestions = currentSuggestions.filter(s => s.id !== sugId);
     renderSuggestionsModal();
     toast('Relationship added!', 'success');

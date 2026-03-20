@@ -150,6 +150,7 @@
         <h3 class="section-title">Admin Controls</h3>
         <button class="btn-secondary full" onclick="openUserMgmt()">👥 Manage Users</button>
         <button class="btn-secondary full" style="margin-top:6px" onclick="openConflicts()">⚠️ View Conflicts</button>
+        <button class="btn-secondary full" style="margin-top:6px" onclick="openActivityLog()">📋 Activity Log</button>
       </section>
 
       <!-- People Directory -->
@@ -399,6 +400,20 @@
       <button class="close-btn" onclick="closeModal('modal-conflicts')">✕</button>
     </div>
     <div id="conflicts-body" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- Activity Log Modal (admin only) -->
+<div id="modal-activity-log" class="modal-backdrop" style="display:none" onclick="closeModal('modal-activity-log')">
+  <div class="modal-box wide al-modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>📋 Activity Log</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">All additions and changes by every user</p>
+      </div>
+      <button class="close-btn" onclick="closeModal('modal-activity-log')">✕</button>
+    </div>
+    <div id="activity-log-body" style="margin-top:14px"></div>
   </div>
 </div>
 
