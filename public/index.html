@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Global Pedigree Chart</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH SCREEN  –  shown when user is not signed in
+════════════════════════════════════════════════════════════ -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <span class="logo-icon">🌳</span>
+      <h1>Global Pedigree Chart</h1>
+      <p>A shared, infinite family tree built by everyone</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="tab-btn active" id="tab-login" onclick="showTab('login')">Sign In</button>
+      <button class="tab-btn" id="tab-register" onclick="showTab('register')">Register</button>
+    </div>
+
+    <!-- Login -->
+    <div id="login-form">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" />
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+      <button class="btn-primary" onclick="login()">Sign In</button>
+    </div>
+
+    <!-- Register -->
+    <div id="register-form" style="display:none">
+      <label>Full Name</label>
+      <input type="text" id="reg-name" placeholder="Jane Doe" />
+      <label>Email</label>
+      <input type="email" id="reg-email" placeholder="you@example.com" autocomplete="email" />
+      <label>Password</label>
+      <input type="password" id="reg-password" placeholder="Min. 6 characters" autocomplete="new-password" />
+      <button class="btn-primary" onclick="register()">Create Account</button>
+    </div>
+
+    <div id="auth-msg"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PENDING APPROVAL  –  shown to unapproved users
+════════════════════════════════════════════════════════════ -->
+<div id="pending-screen" style="display:none">
+  <div class="pending-card">
+    <span style="font-size:48px">⏳</span>
+    <h2>Account Pending Approval</h2>
+    <p>An administrator needs to approve your account before you can access the chart.</p>
+    <button class="btn-ghost" onclick="logout()">Sign Out</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN APP  –  shown to approved users
+════════════════════════════════════════════════════════════ -->
+<div id="app" style="display:none">
+
+  <!-- Header -->
+  <header id="app-header">
+    <div class="header-left">
+      <span class="header-logo">🌳</span>
+      <span class="header-title">Global Pedigree Chart</span>
+    </div>
+    <div class="header-right">
+      <span id="hdr-name"></span>
+      <span id="hdr-badge" class="role-badge"></span>
+      <button class="btn-ghost sm" onclick="logout()">Sign Out</button>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="app-body">
+
+    <!-- ── Left Panel ── -->
+    <aside class="left-panel" id="left-panel">
+
+      <!-- Add Person -->
+      <section class="panel-section">
+        <h3 class="section-title">Add Person</h3>
+        <form id="form-add-person">
+          <input type="text" id="new-name" placeholder="Full name *" required />
+          <select id="new-gender">
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other / Unknown</option>
+          </select>
+          <input type="date" id="new-dob" title="Date of birth (optional)" />
+          <button type="submit" class="btn-primary full">+ Add Person</button>
+        </form>
+      </section>
+
+      <!-- Add Relationship -->
+      <section class="panel-section">
+        <h3 class="section-title">Add Relationship</h3>
+        <form id="form-add-rel">
+          <div class="pick-row">
+            <select id="rel-p1" required><option value="">Person 1 *</option></select>
+            <button type="button" class="pick-chart-btn" onclick="ipSetRelP1()" title="Click a person on the chart">⊕</button>
+          </div>
+          <select id="rel-type" required>
+            <option value="">Relationship type *</option>
+            <option value="parent">is Parent of →</option>
+            <option value="child">is Child of →</option>
+            <option value="sibling">is Sibling of ↔</option>
+            <option value="spouse">is Spouse of ↔</option>
+          </select>
+          <div class="pick-row">
+            <select id="rel-p2" required><option value="">Person 2 *</option></select>
+            <button type="button" class="pick-chart-btn" onclick="ipSetRelP2()" title="Click a person on the chart">⊕</button>
+          </div>
+          <button type="submit" class="btn-primary full">+ Link People</button>
+        </form>
+      </section>
+
+      <!-- Trace Relationship -->
+      <section class="panel-section">
+        <h3 class="section-title">Trace Connection</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="pick-row">
+            <select id="trace-p1"><option value="">Person A *</option></select>
+            <button type="button" class="pick-chart-btn" onclick="ipSetTraceP1()" title="Click a person on the chart">⊕</button>
+          </div>
+          <div class="pick-row">
+            <select id="trace-p2"><option value="">Person B *</option></select>
+            <button type="button" class="pick-chart-btn" onclick="ipSetTraceP2()" title="Click a person on the chart">⊕</button>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn-primary full" onclick="runTrace()">🔍 Find Path</button>
+            <button class="btn-ghost" onclick="clearTrace()" title="Clear trace" style="padding:8px 10px">✕</button>
+          </div>
+        </div>
+        <div id="trace-result"></div>
+      </section>
+
+      <!-- Admin Controls (admin only) -->
+      <section class="panel-section" id="admin-section" style="display:none">
+        <h3 class="section-title">Admin Controls</h3>
+        <button class="btn-secondary full" onclick="openUserMgmt()">👥 Manage Users</button>
+        <button class="btn-secondary full" style="margin-top:6px" onclick="openConflicts()">⚠️ View Conflicts</button>
+      </section>
+
+      <!-- People Directory -->
+      <section class="panel-section people-section">
+        <h3 class="section-title">
+          People
+          <span class="count-badge" id="people-count">0</span>
+        </h3>
+        <input type="text" id="search-input" placeholder="Search by name…" oninput="filterPeople()" />
+        <div id="people-list"></div>
+      </section>
+
+    </aside>
+
+    <!-- Resize handle -->
+    <div class="resize-handle" id="resize-handle"></div>
+
+    <!-- ── Chart Area ── -->
+    <main class="chart-area">
+      <!-- Zoom Controls -->
+      <div class="zoom-controls">
+        <button title="Zoom in" onclick="zoomIn()">＋</button>
+        <button title="Zoom out" onclick="zoomOut()">－</button>
+        <button title="Fit to screen" onclick="fitView()" style="font-size:13px">⤢</button>
+        <button title="Reset zoom" onclick="resetZoom()" style="font-size:12px">1:1</button>
+      </div>
+
+      <!-- Suggest Connections button -->
+      <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
+        💡 Suggest Connections
+      </button>
+
+      <!-- Legend -->
+      <div class="legend">
+        <span class="legend-item"><span class="leg-line parent"></span>Parent / Child</span>
+        <span class="legend-item"><span class="leg-line sibling"></span>Sibling</span>
+        <span class="legend-item"><span class="leg-line spouse"></span>Spouse</span>
+        <span class="legend-item"><span class="leg-line in-law"></span>In-Law</span>
+      </div>
+
+      <!-- Pick-mode banner (shown when waiting for user to click a person) -->
+      <div id="pick-banner" class="pick-banner" style="display:none">
+        <span class="pick-cursor">⊕</span>
+        <span id="pick-banner-label"></span>
+        <button class="pick-cancel" onclick="exitPickMode()">✕ Cancel</button>
+      </div>
+
+      <!-- Loading overlay -->
+      <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <span>Loading pedigree…</span>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty-state" class="empty-state" style="display:none">
+        <span style="font-size:56px">🌱</span>
+        <h2>The tree is empty</h2>
+        <p>Add the first person using the panel on the left to begin building the global pedigree.</p>
+      </div>
+
+      <!-- ── Link (Edge) Popover (appears on edge click) ── -->
+      <div id="link-popover" class="link-popover" style="display:none">
+        <div class="lp-row">
+          <span class="lp-person" id="lp-person1"></span>
+          <span class="lp-arrow">→</span>
+          <span class="lp-badge" id="lp-rel-badge"></span>
+          <span class="lp-arrow">→</span>
+          <span class="lp-person" id="lp-person2"></span>
+          <button class="lp-close" onclick="deselectLink()" title="Close">✕</button>
+        </div>
+        <button class="btn-danger lp-del" id="lp-delete-btn" onclick="deleteSelectedLink()">
+          🗑 Remove Link
+        </button>
+      </div>
+
+      <!-- ── Floating Info Panel (appears on node click) ── -->
+      <div id="info-panel" class="info-panel" style="display:none">
+        <div class="ip-header">
+          <div class="ip-avatar" id="ip-avatar"></div>
+          <div class="ip-header-body">
+            <div class="ip-name" id="ip-name"></div>
+            <div class="ip-meta" id="ip-meta"></div>
+          </div>
+          <button class="ip-close" onclick="deselectNode()" title="Close">✕</button>
+        </div>
+        <div class="ip-connections" id="ip-connections"></div>
+        <div class="ip-actions" id="ip-actions" style="display:none">
+          <button class="btn-secondary sm" onclick="ipEdit()">✏️ Edit</button>
+          <button class="btn-danger sm" id="ip-btn-delete" onclick="ipDelete()">🗑 Delete</button>
+        </div>
+      </div>
+
+      <!-- SVG chart canvas -->
+      <svg id="chart-svg">
+        <defs>
+          <!-- Drop shadow for nodes -->
+          <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="rgba(0,0,0,0.18)" />
+          </filter>
+          <!-- Glow for selected nodes -->
+          <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="rgba(241,196,15,0.9)" />
+          </filter>
+        </defs>
+        <!-- graph group – transformed by zoom/pan -->
+        <g id="chart-root">
+          <g id="links-layer"></g>
+          <g id="nodes-layer"></g>
+        </g>
+      </svg>
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MODALS
+════════════════════════════════════════════════════════════ -->
+
+<!-- Node Detail Modal -->
+<div id="modal-node" class="modal-backdrop" style="display:none" onclick="closeModal('modal-node')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="mnode-name"></h2>
+      <button class="close-btn" onclick="closeModal('modal-node')">✕</button>
+    </div>
+    <div id="mnode-body"></div>
+    <div id="mnode-actions" class="modal-actions" style="display:none">
+      <button class="btn-secondary" onclick="openEditModal()">✏️ Edit</button>
+      <button class="btn-danger" id="btn-delete-node" onclick="deleteSelectedNode()">🗑 Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Person Modal -->
+<div id="modal-edit" class="modal-backdrop" style="display:none" onclick="closeModal('modal-edit')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Edit Person</h2>
+      <button class="close-btn" onclick="closeModal('modal-edit')">✕</button>
+    </div>
+    <form id="form-edit" style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+      <input type="hidden" id="edit-id" />
+      <label>Full Name</label>
+      <input type="text" id="edit-name" required />
+      <label>Gender</label>
+      <select id="edit-gender">
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+        <option value="other">Other / Unknown</option>
+      </select>
+      <label>Date of Birth</label>
+      <input type="date" id="edit-dob" />
+      <div class="modal-actions">
+        <button type="submit" class="btn-primary">Save Changes</button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-edit')">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- User Management Modal -->
+<div id="modal-users" class="modal-backdrop" style="display:none" onclick="closeModal('modal-users')">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>User Management</h2>
+      <button class="close-btn" onclick="closeModal('modal-users')">✕</button>
+    </div>
+    <div id="users-table-wrap" style="margin-top:12px;overflow-x:auto"></div>
+  </div>
+</div>
+
+<!-- Suggested Connections Modal -->
+<div id="modal-suggestions" class="modal-backdrop" style="display:none" onclick="closeModal('modal-suggestions')">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>💡 Suggested Connections</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">
+          Based on your existing tree — accept to add, ignore to review later.
+        </p>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-secondary sm" onclick="rescanSuggestions()" title="Rescan the tree for new suggestions" style="font-size:12px;padding:6px 12px">
+          🔄 Rescan
+        </button>
+        <button class="close-btn" onclick="closeModal('modal-suggestions')">✕</button>
+      </div>
+    </div>
+    <div id="suggestions-body" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- Conflicts Modal -->
+<div id="modal-conflicts" class="modal-backdrop" style="display:none" onclick="closeModal('modal-conflicts')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>⚠️ Relationship Conflicts</h2>
+      <button class="close-btn" onclick="closeModal('modal-conflicts')">✕</button>
+    </div>
+    <div id="conflicts-body" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast" style="display:none"></div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SCRIPTS  –  Firebase compat SDK, D3, then our app
+════════════════════════════════════════════════════════════ -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
