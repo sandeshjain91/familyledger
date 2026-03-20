@@ -1305,6 +1305,10 @@ async function deleteSelectedLink() {
   const link = graphData.links.find(l => l.id === selectedLinkId);
   if (!link) return;
 
+  const isOwner = link.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only remove relationships you created.', 'error'); return; }
+
   const p1 = nodeById.get(link.person1Id);
   const p2 = nodeById.get(link.person2Id);
   if (!confirm(`Remove the "${link.relationshipType}" relationship between ${p1?.name || '?'} and ${p2?.name || '?'}?`)) return;
@@ -1378,8 +1382,10 @@ function showInfoPanel(nodeId) {
   // Admin / owner actions
   const isOwner = node.createdBy === currentUser.uid;
   const isAdmin = currentProfile.role === 'admin';
-  document.getElementById('ip-actions').style.display = (isOwner || isAdmin) ? 'flex' : 'none';
-  document.getElementById('ip-btn-delete').style.display = isAdmin ? 'inline-flex' : 'none';
+  const canEdit   = isOwner || isAdmin;
+  const canDelete = isOwner || isAdmin;
+  document.getElementById('ip-actions').style.display    = canEdit   ? 'flex'        : 'none';
+  document.getElementById('ip-btn-delete').style.display = canDelete ? 'inline-flex' : 'none';
 
   document.getElementById('info-panel').style.display = 'flex';
 }
@@ -1389,6 +1395,9 @@ function ipEdit() {
   if (!selectedNodeId) return;
   const node = nodeById.get(selectedNodeId);
   if (!node) return;
+  const isOwner = node.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only edit people you added.', 'error'); return; }
   document.getElementById('edit-id').value     = node.id;
   document.getElementById('edit-name').value   = node.name;
   document.getElementById('edit-gender').value = node.gender;
@@ -1434,6 +1443,19 @@ async function handleEditSave(e) {
   const dob    = document.getElementById('edit-dob').value || null;
 
   if (!name) return;
+
+  // Permission guard — re-check on the client before writing
+  const node = nodeById.get(id);
+  if (node) {
+    const isOwner = node.createdBy === currentUser.uid;
+    const isAdmin = currentProfile.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      toast('You can only edit people you added.', 'error');
+      closeModal('modal-edit');
+      return;
+    }
+  }
+
   try {
     await db.collection('nodes').doc(id).update({
       name, gender,
@@ -1449,9 +1471,14 @@ async function handleEditSave(e) {
 }
 
 async function deleteSelectedNode() {
-  if (!selectedNodeId || currentProfile.role !== 'admin') return;
+  if (!selectedNodeId) return;
   const node = nodeById.get(selectedNodeId);
   if (!node) return;
+
+  const isOwner = node.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only delete people you added.', 'error'); return; }
+
   if (!confirm(`Permanently delete "${node.name}" and all their relationships?`)) return;
 
   try {
