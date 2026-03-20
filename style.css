@@ -210,6 +210,29 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 .header-logo  { font-size: 22px; }
 .header-title { font-size: 16px; font-weight: 700; letter-spacing: .3px; }
 
+/* ─── Hamburger button ─── */
+.hamburger-btn {
+  display: flex; flex-direction: column; justify-content: center; gap: 5px;
+  width: 36px; height: 36px;
+  background: none; border: none; cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: background .15s;
+}
+.hamburger-btn:hover { background: rgba(255,255,255,.15); }
+.hamburger-btn span {
+  display: block;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+  transition: transform .25s ease, opacity .2s ease, width .25s ease;
+  transform-origin: center;
+}
+/* Animate to X when open */
+.hamburger-btn.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.hamburger-btn.open span:nth-child(2) { opacity: 0; width: 0; }
+.hamburger-btn.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
 #hdr-name { font-size: 13px; color: #cbd5e1; }
 
 .role-badge {
@@ -245,10 +268,19 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   background: var(--surface);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  transition: width .28s ease, min-width .28s ease, border-width .28s ease;
 }
+.left-panel.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  border-right-width: 0;
+  overflow: hidden;
+}
+.app-body.panel-collapsed .resize-handle { display: none; }
 
 /* Custom scrollbar */
 .left-panel::-webkit-scrollbar { width: 5px; }
