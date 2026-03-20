@@ -177,17 +177,31 @@
         <button title="Reset zoom" onclick="resetZoom()" style="font-size:12px">1:1</button>
       </div>
 
-      <!-- Suggest Connections button -->
-      <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
-        💡 Suggest Connections
-      </button>
+      <!-- Chart action buttons -->
+      <div class="chart-action-bar">
+        <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
+          💡 Suggest Connections
+        </button>
+        <button class="rearrange-btn" id="rearrange-btn" onclick="rearrangeChart()" title="Automatically rearrange the chart for the clearest layout">
+          ⇄ Rearrange
+        </button>
+      </div>
 
-      <!-- Legend -->
+      <!-- Legend / Visibility Toggles -->
       <div class="legend">
-        <span class="legend-item"><span class="leg-line parent"></span>Parent / Child</span>
-        <span class="legend-item"><span class="leg-line sibling"></span>Sibling</span>
-        <span class="legend-item"><span class="leg-line spouse"></span>Spouse</span>
-        <span class="legend-item"><span class="leg-line in-law"></span>In-Law</span>
+        <span class="legend-label">Show lines:</span>
+        <button class="leg-toggle" data-type="parent"  onclick="toggleLinkType('parent')"  title="Toggle Parent / Child lines">
+          <span class="leg-line parent"></span><span class="leg-toggle-label">Parent / Child</span>
+        </button>
+        <button class="leg-toggle" data-type="sibling" onclick="toggleLinkType('sibling')" title="Toggle Sibling lines">
+          <span class="leg-line sibling"></span><span class="leg-toggle-label">Sibling</span>
+        </button>
+        <button class="leg-toggle" data-type="spouse"  onclick="toggleLinkType('spouse')"  title="Toggle Spouse lines">
+          <span class="leg-line spouse"></span><span class="leg-toggle-label">Spouse</span>
+        </button>
+        <button class="leg-toggle" data-type="in-law"  onclick="toggleLinkType('in-law')"  title="Toggle In-Law lines">
+          <span class="leg-line in-law"></span><span class="leg-toggle-label">In-Law</span>
+        </button>
       </div>
 
       <!-- Pick-mode banner (shown when waiting for user to click a person) -->

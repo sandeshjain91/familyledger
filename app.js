@@ -49,6 +49,9 @@ let svgEl, svgSel, zoomBehaviour, rootGroup, linksLayer, nodesLayer, simulation;
 // Track whether the graph has been rendered once (to avoid re-centering on every update)
 let graphInitialised = false;
 
+// Which link-type categories are currently hidden (values: 'parent','sibling','spouse','in-law')
+const hiddenLinkTypes = new Set();
+
 // Node visual dimensions
 const NODE_W  = 100;   // rectangle width
 const NODE_H  = 60;    // rectangle height
@@ -602,6 +605,33 @@ function initGraph() {
    Called every time Firestore snapshot fires.
 ════════════════════════════════════════════════════════════ */
 
+/** Returns true if a link should be visually hidden based on the current filter. */
+function isLinkTypeHidden(relType) {
+  if (!relType) return false;
+  if (hiddenLinkTypes.has('in-law')  && relType.endsWith('-in-law'))                   return true;
+  if (hiddenLinkTypes.has('parent')  && (relType === 'parent' || relType === 'child')) return true;
+  if (hiddenLinkTypes.has('sibling') && relType === 'sibling')                         return true;
+  if (hiddenLinkTypes.has('spouse')  && relType === 'spouse')                          return true;
+  return false;
+}
+
+/** Toggle visibility of a link-type category and refresh the chart display. */
+function toggleLinkType(type) {
+  if (hiddenLinkTypes.has(type)) hiddenLinkTypes.delete(type);
+  else hiddenLinkTypes.add(type);
+
+  // Update button states in the legend
+  document.querySelectorAll('.leg-toggle').forEach(btn => {
+    btn.classList.toggle('leg-toggle-off', hiddenLinkTypes.has(btn.dataset.type));
+  });
+
+  // Apply/remove hidden class instantly — no simulation restart needed
+  if (linksLayer) {
+    linksLayer.selectAll('.link-g')
+      .classed('link-type-hidden', d => isLinkTypeHidden(d.relationshipType));
+  }
+}
+
 function updateGraph() {
   if (!svgSel) return;
 
@@ -657,6 +687,9 @@ function updateGraph() {
 
   // Restore selection highlight
   linkMerge.classed('link-selected', d => d.id === selectedLinkId);
+
+  // Apply visibility filter
+  linkMerge.classed('link-type-hidden', d => isLinkTypeHidden(d.relationshipType));
 
   // ── NODES ───────────────────────────────────────────────
   const nodeSel = nodesLayer.selectAll('.node-g')
@@ -935,6 +968,179 @@ function onDragEnd(event, d) {
 function zoomIn()   { svgSel.transition().duration(300).call(zoomBehaviour.scaleBy, 1.5); }
 function zoomOut()  { svgSel.transition().duration(300).call(zoomBehaviour.scaleBy, 0.67); }
 function resetZoom(){ svgSel.transition().duration(400).call(zoomBehaviour.transform, d3.zoomIdentity); }
+
+/* ════════════════════════════════════════════════════════════
+   9b. REARRANGE – smart uncluttered layout
+   ─ Detects disconnected family groups (components)
+   ─ Assigns generation rows via BFS (parents above children)
+   ─ Places spouses side-by-side, siblings clustered
+   ─ Seeds positions, then lets simulation fine-tune
+════════════════════════════════════════════════════════════ */
+
+function rearrangeChart() {
+  const nodes = graphData.nodes;
+  const links = graphData.links;
+  if (!nodes.length) { toast('Nothing to rearrange', 'error'); return; }
+
+  // Show spinner on button
+  const btn = document.getElementById('rearrange-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rearranging…'; }
+
+  // ── 1. Build relationship maps (non-reverse links only) ──
+  const childrenOf = new Map(nodes.map(n => [n.id, new Set()]));
+  const parentsOf  = new Map(nodes.map(n => [n.id, new Set()]));
+  const spousesOf  = new Map(nodes.map(n => [n.id, new Set()]));
+  const adj        = new Map(nodes.map(n => [n.id, new Set()]));
+
+  links.forEach(l => {
+    const { person1Id: a, person2Id: b, relationshipType: t, isReverse } = l;
+    if (isReverse) return;
+    adj.get(a)?.add(b); adj.get(b)?.add(a);
+    if (t === 'parent') {
+      childrenOf.get(a)?.add(b);
+      parentsOf.get(b)?.add(a);
+    } else if (t === 'child') {
+      parentsOf.get(a)?.add(b);
+      childrenOf.get(b)?.add(a);
+    } else if (t === 'spouse') {
+      spousesOf.get(a)?.add(b);
+      spousesOf.get(b)?.add(a);
+    }
+  });
+
+  // ── 2. Find connected components (BFS over any link type) ──
+  const visited    = new Set();
+  const components = [];
+
+  nodes.forEach(n => {
+    if (visited.has(n.id)) return;
+    const comp = [];
+    const stack = [n.id];
+    while (stack.length) {
+      const id = stack.pop();
+      if (visited.has(id)) continue;
+      visited.add(id); comp.push(id);
+      adj.get(id)?.forEach(nb => { if (!visited.has(nb)) stack.push(nb); });
+    }
+    components.push(comp);
+  });
+
+  // ── 3. Assign generation levels within each component ──
+  const level = new Map();
+
+  components.forEach(compIds => {
+    const compSet = new Set(compIds);
+    const compParents  = id => [...(parentsOf.get(id)  || [])].filter(p => compSet.has(p));
+    const compChildren = id => [...(childrenOf.get(id) || [])].filter(c => compSet.has(c));
+
+    // BFS from roots (nodes with no parents in this component)
+    const roots = compIds.filter(id => compParents(id).length === 0);
+    const seeds = roots.length ? roots : [compIds[0]];
+
+    const q = seeds.map(id => ({ id, lv: 0 }));
+    const local = new Map();
+
+    while (q.length) {
+      const { id, lv } = q.shift();
+      if (local.has(id) && local.get(id) <= lv) continue;
+      local.set(id, lv);
+      compChildren(id).forEach(cid => q.push({ id: cid, lv: lv + 1 }));
+      compParents(id).forEach(pid => { if (!local.has(pid)) q.push({ id: pid, lv: lv - 1 }); });
+    }
+
+    // Any still-unassigned (e.g. only spouse links) → same level as nearest assigned neighbour
+    compIds.forEach(id => {
+      if (!local.has(id)) {
+        const nb = [...(adj.get(id) || [])].find(n => local.has(n));
+        local.set(id, nb != null ? local.get(nb) : 0);
+      }
+    });
+
+    // Normalise so min level == 0
+    const minLv = Math.min(...local.values());
+    compIds.forEach(id => level.set(id, local.get(id) - minLv));
+  });
+
+  // ── 4. Position nodes ──
+  const HGAP      = 210;  // horizontal spacing between nodes in the same row
+  const VGAP      = 230;  // vertical spacing between generations
+  const COMP_GAP  = 350;  // extra gap between disconnected components
+
+  let compXOffset = 0;
+
+  components.forEach(compIds => {
+    // Group IDs by generation level
+    const byLevel = new Map();
+    compIds.forEach(id => {
+      const lv = level.get(id) ?? 0;
+      if (!byLevel.has(lv)) byLevel.set(lv, []);
+      byLevel.get(lv).push(id);
+    });
+
+    // Sort each level so spouses are adjacent, then siblings are clustered
+    byLevel.forEach((ids, _lv) => {
+      const ordered = [];
+      const placed  = new Set();
+
+      ids.forEach(id => {
+        if (placed.has(id)) return;
+        ordered.push(id); placed.add(id);
+        // Place spouse immediately after
+        spousesOf.get(id)?.forEach(sid => {
+          if (!placed.has(sid) && ids.includes(sid)) {
+            ordered.push(sid); placed.add(sid);
+          }
+        });
+      });
+      byLevel.set(_lv, ordered);
+    });
+
+    // Width of the widest row in this component
+    const maxCount  = Math.max(...[...byLevel.values()].map(a => a.length));
+    const compWidth = (maxCount - 1) * HGAP;
+
+    // Assign x/y, clear any pinned position
+    byLevel.forEach((ids, lv) => {
+      const count = ids.length;
+      ids.forEach((id, i) => {
+        const node = nodes.find(n => n.id === id);
+        if (!node) return;
+        node.fx = null;
+        node.fy = null;
+        node.vx = 0;
+        node.vy = 0;
+        node.x  = compXOffset + (i - (count - 1) / 2) * HGAP;
+        node.y  = lv * VGAP;
+      });
+    });
+
+    compXOffset += compWidth + COMP_GAP;
+  });
+
+  // Centre the whole layout around origin
+  const allX   = nodes.map(n => n.x);
+  const cx     = (Math.min(...allX) + Math.max(...allX)) / 2;
+  nodes.forEach(n => { n.x -= cx; });
+
+  // ── 5. Fire simulation at high energy to let it fine-tune ──
+  simulation
+    .force('charge',  d3.forceManyBody().strength(-700).distanceMax(900))
+    .force('collide', d3.forceCollide(90))
+    .alpha(0.85)
+    .alphaTarget(0)
+    .restart();
+
+  // After simulation settles, restore normal forces and fit view
+  setTimeout(() => {
+    simulation
+      .force('charge',  d3.forceManyBody().strength(-600).distanceMax(800))
+      .force('collide', d3.forceCollide(80));
+    fitView();
+    if (btn) { btn.disabled = false; btn.innerHTML = '⇄ Rearrange'; }
+  }, 1400);
+
+  toast('Rearranging chart… ✨');
+}
 
 /** Fit all nodes into the visible viewport with padding. */
 function fitView() {

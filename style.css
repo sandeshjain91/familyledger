@@ -408,11 +408,19 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 }
 .zoom-controls button:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-/* ─── Suggest Connections Button ─── */
-.suggest-btn {
+/* ─── Chart Action Bar (Suggest + Rearrange) ─── */
+.chart-action-bar {
   position: absolute;
   top: 14px;
   left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+
+.suggest-btn,
+.rearrange-btn {
   background: var(--surface);
   color: var(--text);
   border: 1.5px solid var(--border);
@@ -421,16 +429,28 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   font-size: 13px;
   font-weight: 600;
   box-shadow: var(--shadow-sm);
-  z-index: 10;
   display: flex;
   align-items: center;
   gap: 6px;
   transition: background .18s, border-color .18s, box-shadow .18s;
+  white-space: nowrap;
 }
+
 .suggest-btn:hover {
   background: #fefce8;
   border-color: var(--warning);
   box-shadow: 0 0 0 3px rgba(245,158,11,.15);
+}
+
+.rearrange-btn:hover {
+  background: #eff6ff;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+}
+
+.rearrange-btn:disabled {
+  opacity: .65;
+  cursor: not-allowed;
 }
 
 /* ─── Pick-mode banner ─── */
@@ -465,32 +485,70 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 #chart-svg.pick-mode-active { cursor: crosshair; }
 #chart-svg.pick-mode-active .node-g { cursor: pointer; }
 
-/* ─── Legend ─── */
+/* ─── Legend / Visibility Toggles ─── */
 .legend {
   position: absolute;
   bottom: 14px; right: 14px;
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 14px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   box-shadow: var(--shadow-sm);
   z-index: 10;
 }
-.legend-item {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--text-muted);
+
+.legend-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-muted);
+  padding: 2px 6px 4px;
 }
+
+/* Each legend item is now a toggle button */
+.leg-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 7px;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, opacity .2s;
+  text-align: left;
+  width: 100%;
+}
+.leg-toggle:hover {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* OFF state — greyed out, strikethrough text */
+.leg-toggle.leg-toggle-off {
+  opacity: .38;
+}
+.leg-toggle.leg-toggle-off .leg-toggle-label {
+  text-decoration: line-through;
+}
+
 .leg-line {
   display: inline-block;
   width: 28px; height: 3px;
   border-radius: 2px;
+  flex-shrink: 0;
 }
 .leg-line.parent  { background: var(--link-parent); }
 .leg-line.sibling { background: var(--link-sibling); }
-.leg-line.spouse  { background: var(--link-spouse); border-top: 3px dashed var(--link-spouse); background: transparent; }
+.leg-line.spouse  { border-top: 3px dashed var(--link-spouse); background: transparent; }
 .leg-line.in-law  { border-top: 3px dashed #0d9488; background: transparent; }
 
 /* ─── Loading Overlay ─── */
@@ -631,6 +689,9 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   fill: #bbf7d0;
   pointer-events: none;
 }
+
+/* Hidden link type (toggled via legend buttons) */
+.link-g.link-type-hidden { display: none; }
 
 /* ─── Link selected state ─── */
 .link-g.link-selected .link-line {
