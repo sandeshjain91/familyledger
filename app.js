@@ -967,13 +967,14 @@ function zoomOut()  { svgSel.transition().duration(300).call(zoomBehaviour.scale
 function resetZoom(){ svgSel.transition().duration(400).call(zoomBehaviour.transform, d3.zoomIdentity); }
 
 /* ════════════════════════════════════════════════════════════
-   9b. REARRANGE – medical pedigree chart layout
-   ─ Strict generational rows (grandparents top, children bottom)
-   ─ Couples placed side-by-side
-   ─ Children centered below the midpoint of their parents
-   ─ Sibling groups never overlap
-   ─ Disconnected families laid out as separate columns
-   ─ All positions are pinned (fx/fy) – simulation does NOT fight layout
+   9b. REARRANGE – Sugiyama crossing-minimisation layout
+   ─ Y axis : strict BFS generation rows (parents always above children)
+   ─ X axis : Sugiyama barycenter sweep (24 alternating top-down /
+              bottom-up passes) – the standard algorithm for minimising
+              line crossings in hierarchical graphs
+   ─ Couples kept adjacent after every sort pass
+   ─ Final X positions handed to the live simulation so nodes
+     remain draggable and spring back to their row
 ════════════════════════════════════════════════════════════ */
 
 function rearrangeChart() {
@@ -984,28 +985,25 @@ function rearrangeChart() {
   const btn = document.getElementById('rearrange-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Laying out…'; }
 
-  // ── Constants ──────────────────────────────────────────────
-  const HGAP = 140;   // minimum horizontal spacing between node centres
-  const VGAP = 200;   // vertical spacing between generations
-  const CGAP = 280;   // extra gap between disconnected family groups
+  const HGAP  = 120;   // horizontal px per node slot
+  const VGAP  = 200;   // vertical px between generation rows
+  const SWEEPS = 24;   // barycenter sweep iterations (more = fewer crossings)
 
-  // ── 1. Build relationship maps (non-reverse only) ──────────
+  // ── 1. Build relationship maps (non-reverse links only) ────
   const childrenOf = new Map(nodes.map(n => [n.id, new Set()]));
   const parentsOf  = new Map(nodes.map(n => [n.id, new Set()]));
   const spousesOf  = new Map(nodes.map(n => [n.id, new Set()]));
-  const adjAny     = new Map(nodes.map(n => [n.id, new Set()]));
 
   links.filter(l => !l.isReverse).forEach(({ person1Id: a, person2Id: b, relationshipType: t }) => {
-    adjAny.get(a)?.add(b); adjAny.get(b)?.add(a);
     if      (t === 'parent') { childrenOf.get(a)?.add(b); parentsOf.get(b)?.add(a); }
     else if (t === 'child')  { childrenOf.get(b)?.add(a); parentsOf.get(a)?.add(b); }
     else if (t === 'spouse') { spousesOf.get(a)?.add(b);  spousesOf.get(b)?.add(a); }
   });
 
-  // ── 2. Generation levels via iterative BFS ─────────────────
+  // ── 2. BFS generation levels ───────────────────────────────
   const level = new Map();
 
-  function assignLevels(startId, startLv) {
+  function bfsLevel(startId, startLv) {
     const q = [{ id: startId, lv: startLv }];
     while (q.length) {
       const { id, lv } = q.shift();
@@ -1014,194 +1012,132 @@ function rearrangeChart() {
       childrenOf.get(id)?.forEach(c => q.push({ id: c, lv: lv + 1 }));
     }
   }
+  nodes.forEach(n => { if (!parentsOf.get(n.id)?.size) bfsLevel(n.id, 0); });
+  nodes.forEach(n => { if (!level.has(n.id)) bfsLevel(n.id, 0); });
 
-  nodes.forEach(n => { if (!parentsOf.get(n.id)?.size) assignLevels(n.id, 0); });
-  nodes.forEach(n => { if (!level.has(n.id))            assignLevels(n.id, 0); });
-
-  // Normalise so min level == 0
+  // Snap married-in nodes (no parents) to spouse's generation
+  let snapDone = false;
+  while (!snapDone) {
+    snapDone = true;
+    nodes.forEach(n => {
+      if (parentsOf.get(n.id)?.size) return;
+      spousesOf.get(n.id)?.forEach(sid => {
+        const sl = level.get(sid);
+        if (sl !== undefined && level.get(n.id) !== sl) {
+          level.set(n.id, sl); snapDone = false;
+        }
+      });
+    });
+  }
   const minLv = Math.min(...level.values());
   nodes.forEach(n => level.set(n.id, level.get(n.id) - minLv));
 
-  // ── 3. Connected components ────────────────────────────────
-  const visited    = new Set();
-  const components = [];
+  // ── 3. Group nodes by level ────────────────────────────────
+  const byLevel = new Map();
   nodes.forEach(n => {
-    if (visited.has(n.id)) return;
-    const comp = [], stack = [n.id];
-    while (stack.length) {
-      const id = stack.pop();
-      if (visited.has(id)) continue;
-      visited.add(id); comp.push(id);
-      adjAny.get(id)?.forEach(nb => { if (!visited.has(nb)) stack.push(nb); });
-    }
-    components.push(comp);
+    const lv = level.get(n.id) ?? 0;
+    if (!byLevel.has(lv)) byLevel.set(lv, []);
+    byLevel.get(lv).push(n.id);
   });
+  const levels = [...byLevel.keys()].sort((a, b) => a - b);
 
-  // ── 4. Build nuclear family map ────────────────────────────
-  // family key = sorted parent IDs → { parents, children }
-  function buildFamilyMap(compSet) {
-    const fm = new Map();
-    compSet.forEach(childId => {
-      const pars = [...(parentsOf.get(childId) || [])].filter(p => compSet.has(p)).sort();
-      if (!pars.length) return;
-      const key = pars.join('|');
-      if (!fm.has(key)) fm.set(key, { parents: pars, children: [] });
-      fm.get(key).children.push(childId);
-    });
-    return fm;
-  }
-
-  // ── 5. Helper: order a list of IDs so spouses are adjacent ─
-  function coupleSort(ids) {
+  // ── 4. Helper: keep couples adjacent inside an ordered list ─
+  function coupleAdjacent(ids) {
     const result = [], placed = new Set();
     ids.forEach(id => {
       if (placed.has(id)) return;
       result.push(id); placed.add(id);
       spousesOf.get(id)?.forEach(sid => {
-        if (!placed.has(sid) && ids.includes(sid)) { result.push(sid); placed.add(sid); }
+        if (!placed.has(sid) && ids.includes(sid)) {
+          result.push(sid); placed.add(sid);
+        }
       });
     });
     return result;
   }
 
-  // ── 6. Lay out each component independently ────────────────
-  const posX = new Map(), posY = new Map();
-  let compOffset = 0;
-
-  components.forEach(compIds => {
-    const cs = new Set(compIds);
-    const fm = buildFamilyMap(cs);
-
-    // Group by level
-    const byLevel = new Map();
-    compIds.forEach(id => {
-      const lv = level.get(id) ?? 0;
-      if (!byLevel.has(lv)) byLevel.set(lv, []);
-      byLevel.get(lv).push(id);
-    });
-    const levels = [...byLevel.keys()].sort((a, b) => a - b);
-
-    // ── 6a. Place top generation left-to-right, couples adjacent
-    const topLv      = levels[0];
-    const topOrdered = coupleSort(byLevel.get(topLv) || []);
-    topOrdered.forEach((id, i) => {
-      posX.set(id, i * HGAP);
-      posY.set(id, topLv * VGAP);
-    });
-
-    // ── 6b. Place each subsequent generation
-    for (let li = 1; li < levels.length; li++) {
-      const lv      = levels[li];
-      const lvNodes = byLevel.get(lv) || [];
-
-      // Sort families by their parents' average X (left-to-right ordering)
-      const relevantFams = [...fm.values()]
-        .filter(f =>
-          f.children.some(c => (level.get(c) ?? 0) === lv && cs.has(c)) &&
-          f.parents.every(p => posX.has(p))
-        )
-        .sort((a, b) => _avgX(a.parents, posX) - _avgX(b.parents, posX));
-
-      // Tentative X: centre each sibling group under the parent midpoint
-      const tentX  = new Map();
-      const placed = new Set();
-
-      relevantFams.forEach(fam => {
-        const siblings = coupleSort(
-          fam.children.filter(c => (level.get(c) ?? 0) === lv && cs.has(c))
-        );
-        if (!siblings.length) return;
-
-        const parentMid = _avgX(fam.parents, posX);
-        const totalSpan = (siblings.length - 1) * HGAP;
-        const startX    = parentMid - totalSpan / 2;
-
-        siblings.forEach((id, i) => {
-          tentX.set(id, startX + i * HGAP);
-          placed.add(id);
-        });
-      });
-
-      // Any orphan nodes at this level (no parents placed yet)
-      let tailX = tentX.size ? Math.max(...tentX.values()) + HGAP : 0;
-      lvNodes.forEach(id => {
-        if (!placed.has(id)) { tentX.set(id, tailX); tailX += HGAP; }
-      });
-
-      // ── Resolve overlaps: left-to-right sweep enforces HGAP minimum
-      const byX = [...tentX.entries()].sort((a, b) => a[1] - b[1]);
-      let floor = -Infinity;
-      byX.forEach(([id, tx]) => {
-        const safe = Math.max(tx, floor + HGAP);
-        tentX.set(id, safe);
-        floor = safe;
-      });
-
-      // ── Re-centre sibling groups under parents after overlap resolution
-      relevantFams.forEach(fam => {
-        const siblings = fam.children.filter(c => (level.get(c) ?? 0) === lv && cs.has(c));
-        if (siblings.length < 2) return;
-        const parentMid  = _avgX(fam.parents, posX);
-        const currentMid = _avgX(siblings, tentX);
-        const shift      = parentMid - currentMid;
-        // Only shift right (avoid pushing already-placed nodes left into overlap)
-        if (shift > 1) {
-          // Check no sibling would move left of its left neighbour
-          siblings.forEach(id => tentX.set(id, tentX.get(id) + shift));
-          // Re-run left-to-right overlap fix for safety
-          const byX2 = [...tentX.entries()].sort((a, b) => a[1] - b[1]);
-          let floor2 = -Infinity;
-          byX2.forEach(([id, tx]) => {
-            const safe = Math.max(tx, floor2 + HGAP);
-            tentX.set(id, safe);
-            floor2 = safe;
-          });
-        }
-      });
-
-      tentX.forEach((x, id) => { posX.set(id, x); posY.set(id, lv * VGAP); });
-    }
-
-    // ── 6c. Shift the whole component so leftmost node is at compOffset
-    const compXs = compIds.map(id => posX.get(id) ?? 0);
-    const minCX  = Math.min(...compXs);
-    const maxCX  = Math.max(...compXs);
-
-    compIds.forEach(id => {
-      const node = nodes.find(n => n.id === id);
-      if (!node) return;
-      node.x  = compOffset + (posX.get(id) ?? 0) - minCX;
-      node.y  = posY.get(id) ?? 0;
-      node.fx = node.x;   // PIN: simulation must not move these
-      node.fy = node.y;
-      node.vx = 0; node.vy = 0;
-    });
-
-    compOffset += (maxCX - minCX) + CGAP;
+  // ── 5. Initialise per-node "slot" positions (integer index) ─
+  // Start with couples adjacent; positions will be refined by sweeps.
+  const slot = new Map();   // id → float position used for barycenter math
+  levels.forEach(lv => {
+    const ordered = coupleAdjacent(byLevel.get(lv) || []);
+    byLevel.set(lv, ordered);
+    ordered.forEach((id, i) => slot.set(id, i));
   });
 
-  // ── 7. Centre the whole layout around x=0 ─────────────────
-  const allX = nodes.map(n => n.x ?? 0);
-  const cx   = (Math.min(...allX) + Math.max(...allX)) / 2;
-  nodes.forEach(n => { n.x -= cx; n.fx = n.x; });
+  // ── 6. Barycenter crossing-minimisation sweeps ─────────────
+  // Each sweep: reorder a layer by the mean slot-position of its
+  // neighbours in the adjacent layer, then re-apply couple-adjacency.
+  // Alternating top-down / bottom-up propagates information both ways.
 
-  // ── 8. Apply positions: run simulation at near-zero alpha
-  //       so it respects fx/fy pins without fighting the layout
-  simulation.alpha(0.001).restart();
+  function baryOf(id, refSlot) {
+    // Neighbours that contribute to crossing count: parents & children
+    const upNb   = [...(parentsOf.get(id)  || [])].filter(p => refSlot.has(p));
+    const downNb = [...(childrenOf.get(id) || [])].filter(c => refSlot.has(c));
+    const nb     = upNb.length ? upNb : downNb;
+    if (!nb.length) return slot.get(id) ?? 0;   // unmoved
+    return nb.reduce((sum, x) => sum + refSlot.get(x), 0) / nb.length;
+  }
+
+  for (let sw = 0; sw < SWEEPS; sw++) {
+    if (sw % 2 === 0) {
+      // Top-down pass
+      for (let li = 1; li < levels.length; li++) {
+        const lv  = levels[li];
+        const ids = [...(byLevel.get(lv) || [])];
+        const snap = new Map(ids.map(id => [id, slot.get(id) ?? 0]));  // snapshot of parent slots
+        ids.sort((a, b) => baryOf(a, snap) - baryOf(b, snap));
+        const reordered = coupleAdjacent(ids);
+        byLevel.set(lv, reordered);
+        reordered.forEach((id, i) => slot.set(id, i));
+      }
+    } else {
+      // Bottom-up pass
+      for (let li = levels.length - 2; li >= 0; li--) {
+        const lv  = levels[li];
+        const ids = [...(byLevel.get(lv) || [])];
+        const snap = new Map(ids.map(id => [id, slot.get(id) ?? 0]));
+        ids.sort((a, b) => baryOf(a, snap) - baryOf(b, snap));
+        const reordered = coupleAdjacent(ids);
+        byLevel.set(lv, reordered);
+        reordered.forEach((id, i) => slot.set(id, i));
+      }
+    }
+  }
+
+  // ── 7. Convert slot indices → pixel X, set node positions ──
+  levels.forEach(lv => {
+    const ordered = byLevel.get(lv) || [];
+    const n = ordered.length;
+    ordered.forEach((id, i) => {
+      const node = nodes.find(nd => nd.id === id);
+      if (!node) return;
+      node.x    = (i - (n - 1) / 2) * HGAP;
+      node.y    = lv * VGAP;
+      node._gen = lv;          // store for ongoing springback force
+      node.fx   = null;        // keep nodes draggable
+      node.fy   = null;
+      node.vx   = 0;
+      node.vy   = 0;
+    });
+  });
+
+  // ── 8. Live simulation: genY springback + collision/charge ──
+  // forceY keeps each node attracted to its generation row so nodes
+  // spring back after being pushed; charge + collide prevent overlap.
+  simulation
+    .force('genY', d3.forceY(d => (d._gen ?? 0) * VGAP).strength(0.6))
+    .alpha(0.4)
+    .restart();
+
   setTimeout(() => {
-    simulation.stop();
     fitView();
     if (btn) { btn.disabled = false; btn.innerHTML = '⇄ Rearrange'; }
-  }, 250);
+  }, 400);
 
-  toast('Laid out as pedigree chart ✨');
+  toast('Chart arranged – crossings minimised ✨');
 }
 
-/** Average X of an array of node IDs from a posX Map. */
-function _avgX(ids, posX) {
-  if (!ids.length) return 0;
-  return ids.reduce((s, id) => s + (posX.get(id) ?? 0), 0) / ids.length;
-}
 
 /** Fit all nodes into the visible viewport with padding. */
 function fitView() {
@@ -1983,6 +1919,158 @@ function refreshPersonSelects() {
     }
   });
 }
+
+/* ════════════════════════════════════════════════════════════
+   EXPORT  –  CSV / JSON / GEDCOM download
+════════════════════════════════════════════════════════════ */
+
+const REL_LABEL = {
+  'parent':        'is Parent of',
+  'child':         'is Child of',
+  'sibling':       'is Sibling of',
+  'spouse':        'is Spouse of',
+  'parent-in-law': 'is Parent-in-law of',
+  'child-in-law':  'is Child-in-law of',
+  'sibling-in-law':'is Sibling-in-law of',
+};
+
+function openExportModal() {
+  const pCount = graphData.nodes.length;
+  const rCount = graphData.links.filter(l => !l.isReverse).length;
+  document.getElementById('export-stats').innerHTML =
+    `<span class="export-stat"><strong>${pCount}</strong> people</span>` +
+    `<span class="export-stat-sep">·</span>` +
+    `<span class="export-stat"><strong>${rCount}</strong> relationships</span>`;
+  document.getElementById('modal-export').style.display = 'flex';
+}
+
+function _downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV() {
+  const people = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
+  const rels   = graphData.links.filter(l => !l.isReverse);
+  const esc    = v => `"${(v || '').replace(/"/g, '""')}"`;
+
+  let csv = 'PEOPLE\r\nName,Gender,Date of Birth\r\n';
+  people.forEach(p => {
+    csv += `${esc(p.name)},${esc(p.gender)},${esc(p.dateOfBirth || '')}\r\n`;
+  });
+
+  csv += '\r\nRELATIONSHIPS\r\nPerson 1,Relationship,Person 2\r\n';
+  rels.forEach(l => {
+    const p1  = nodeById.get(l.person1Id)?.name || l.person1Id;
+    const p2  = nodeById.get(l.person2Id)?.name || l.person2Id;
+    const rel = REL_LABEL[l.relationshipType] || l.relationshipType;
+    csv += `${esc(p1)},${esc(rel)},${esc(p2)}\r\n`;
+  });
+
+  _downloadFile(csv, 'pedigree-export.csv', 'text/csv;charset=utf-8;');
+  closeModal('modal-export');
+  toast('CSV downloaded ✓', 'success');
+}
+
+function exportJSON() {
+  const people = [...graphData.nodes]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(p => ({ name: p.name, gender: p.gender || null, dateOfBirth: p.dateOfBirth || null }));
+
+  const relationships = graphData.links.filter(l => !l.isReverse).map(l => ({
+    person1:      nodeById.get(l.person1Id)?.name || l.person1Id,
+    relationship: l.relationshipType,
+    person2:      nodeById.get(l.person2Id)?.name || l.person2Id,
+  }));
+
+  _downloadFile(
+    JSON.stringify({ exportedAt: new Date().toISOString(), totalPeople: people.length, totalRelationships: relationships.length, people, relationships }, null, 2),
+    'pedigree-export.json', 'application/json'
+  );
+  closeModal('modal-export');
+  toast('JSON downloaded ✓', 'success');
+}
+
+function exportGEDCOM() {
+  const nodes  = graphData.nodes;
+  const links  = graphData.links.filter(l => !l.isReverse);
+  const iTag   = new Map(nodes.map((n, i) => [n.id, `@I${i + 1}@`]));
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+  // Build FAM records from spouse links + their shared children
+  const famSeen = new Set();
+  const families = [];
+  let fi = 1;
+
+  links.filter(l => l.relationshipType === 'spouse').forEach(l => {
+    const key = [l.person1Id, l.person2Id].sort().join(':');
+    if (famSeen.has(key)) return;
+    famSeen.add(key);
+    const childIds = [...new Set(
+      links.filter(l2 => l2.relationshipType === 'parent' &&
+        (l2.person1Id === l.person1Id || l2.person1Id === l.person2Id))
+      .map(l2 => l2.person2Id)
+    )];
+    families.push({ famTag: `@F${fi++}@`, p1: l.person1Id, p2: l.person2Id, childIds });
+  });
+
+  // Single-parent families
+  links.filter(l => l.relationshipType === 'parent').forEach(l => {
+    const already = families.some(f =>
+      (f.p1 === l.person1Id || f.p2 === l.person1Id) && f.childIds.includes(l.person2Id));
+    if (already) return;
+    let fam = families.find(f => (f.p1 === l.person1Id || f.p2 === l.person1Id) && !f.p2);
+    if (!fam) { fam = { famTag: `@F${fi++}@`, p1: l.person1Id, p2: null, childIds: [] }; families.push(fam); }
+    if (!fam.childIds.includes(l.person2Id)) fam.childIds.push(l.person2Id);
+  });
+
+  const childFamOf  = new Map();
+  const spouseFamsOf = new Map(nodes.map(n => [n.id, []]));
+  families.forEach(f => {
+    f.childIds.forEach(cid => childFamOf.set(cid, f.famTag));
+    if (f.p1) spouseFamsOf.get(f.p1)?.push(f.famTag);
+    if (f.p2) spouseFamsOf.get(f.p2)?.push(f.famTag);
+  });
+
+  let ged = '0 HEAD\r\n1 GEDC\r\n2 VERS 5.5.1\r\n2 FORM LINEAGE-LINKED\r\n1 CHAR UTF-8\r\n1 SOUR Global-Pedigree-Chart\r\n2 NAME Global Pedigree Chart\r\n';
+
+  nodes.forEach(n => {
+    const tag   = iTag.get(n.id);
+    const parts = n.name.trim().split(' ');
+    const surn  = parts.length > 1 ? parts[parts.length - 1] : '';
+    const givn  = parts.slice(0, surn ? -1 : undefined).join(' ') || n.name;
+    const sex   = n.gender === 'male' ? 'M' : n.gender === 'female' ? 'F' : 'U';
+    ged += `0 ${tag} INDI\r\n1 NAME ${givn}${surn ? ' /' + surn + '/' : ''}\r\n`;
+    if (surn) ged += `2 SURN ${surn}\r\n`;
+    if (givn) ged += `2 GIVN ${givn}\r\n`;
+    ged += `1 SEX ${sex}\r\n`;
+    if (n.dateOfBirth) {
+      const [y, mo, d] = n.dateOfBirth.split('-');
+      const gd = [d && d.padStart(2,'0'), mo && months[+mo-1], y].filter(Boolean).join(' ');
+      ged += `1 BIRT\r\n2 DATE ${gd}\r\n`;
+    }
+    if (childFamOf.has(n.id))  ged += `1 FAMC ${childFamOf.get(n.id)}\r\n`;
+    (spouseFamsOf.get(n.id)||[]).forEach(ft => { ged += `1 FAMS ${ft}\r\n`; });
+  });
+
+  families.forEach(f => {
+    ged += `0 ${f.famTag} FAM\r\n`;
+    const p1node = nodes.find(n => n.id === f.p1);
+    const p2node = f.p2 ? nodes.find(n => n.id === f.p2) : null;
+    if (f.p1) ged += `1 ${p1node?.gender === 'female' ? 'WIFE' : 'HUSB'} ${iTag.get(f.p1)}\r\n`;
+    if (f.p2) ged += `1 ${p2node?.gender === 'female' ? 'WIFE' : 'HUSB'} ${iTag.get(f.p2)}\r\n`;
+    f.childIds.forEach(cid => { ged += `1 CHIL ${iTag.get(cid)}\r\n`; });
+  });
+
+  ged += '0 TRLR\r\n';
+  _downloadFile(ged, 'pedigree-export.ged', 'text/plain;charset=utf-8;');
+  closeModal('modal-export');
+  toast('GEDCOM downloaded ✓', 'success');
+}
+
 
 /* ════════════════════════════════════════════════════════════
    TRACE RELATIONSHIP  –  BFS shortest path between two members

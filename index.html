@@ -178,6 +178,7 @@
         <h3 class="section-title">
           People
           <span class="count-badge" id="people-count">0</span>
+          <button class="export-icon-btn" onclick="openExportModal()" title="Export people & relationships">⬇ Export</button>
         </h3>
         <input type="text" id="search-input" placeholder="Search by name…" oninput="filterPeople()" />
         <div id="people-list"></div>
@@ -446,6 +447,47 @@
       <button class="close-btn" onclick="closeModal('modal-activity-log')">✕</button>
     </div>
     <div id="activity-log-body" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<!-- Export Modal -->
+<div id="modal-export" class="modal-backdrop" style="display:none" onclick="closeModal('modal-export')">
+  <div class="modal-box export-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>⬇ Export Data</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">
+          Download all people and their relationships
+        </p>
+      </div>
+      <button class="close-btn" onclick="closeModal('modal-export')">✕</button>
+    </div>
+
+    <div class="export-stats" id="export-stats"></div>
+
+    <div class="export-options">
+      <button class="export-opt-btn" onclick="exportCSV()">
+        <span class="export-opt-icon">📄</span>
+        <div>
+          <div class="export-opt-title">CSV Spreadsheet</div>
+          <div class="export-opt-desc">Opens in Excel, Google Sheets, Numbers</div>
+        </div>
+      </button>
+      <button class="export-opt-btn" onclick="exportJSON()">
+        <span class="export-opt-icon">{ }</span>
+        <div>
+          <div class="export-opt-title">JSON</div>
+          <div class="export-opt-desc">Structured data — import into any app</div>
+        </div>
+      </button>
+      <button class="export-opt-btn" onclick="exportGEDCOM()">
+        <span class="export-opt-icon">🌳</span>
+        <div>
+          <div class="export-opt-title">GEDCOM</div>
+          <div class="export-opt-desc">Standard genealogy format — import into Ancestry, MyHeritage, Gramps…</div>
+        </div>
+      </button>
+    </div>
   </div>
 </div>
 
