@@ -107,7 +107,12 @@
         <h3 class="section-title">Add Relationship</h3>
         <form id="form-add-rel">
           <div class="pick-row">
-            <select id="rel-p1" required><option value="">Person 1 *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person 1 – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="rel-p1" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetRelP1()" title="Click a person on the chart">⊕</button>
           </div>
           <select id="rel-type" required>
@@ -118,7 +123,12 @@
             <option value="spouse">is Spouse of ↔</option>
           </select>
           <div class="pick-row">
-            <select id="rel-p2" required><option value="">Person 2 *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person 2 – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="rel-p2" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetRelP2()" title="Click a person on the chart">⊕</button>
           </div>
           <button type="submit" class="btn-primary full">+ Link People</button>
@@ -130,11 +140,21 @@
         <h3 class="section-title">Trace Connection</h3>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div class="pick-row">
-            <select id="trace-p1"><option value="">Person A *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person A – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="trace-p1" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetTraceP1()" title="Click a person on the chart">⊕</button>
           </div>
           <div class="pick-row">
-            <select id="trace-p2"><option value="">Person B *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person B – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="trace-p2" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetTraceP2()" title="Click a person on the chart">⊕</button>
           </div>
           <div style="display:flex;gap:6px">
@@ -180,6 +200,13 @@
 
       <!-- Chart action buttons -->
       <div class="chart-action-bar">
+        <div class="chart-search-wrap">
+          <span class="chart-search-icon">🔍</span>
+          <input type="text" id="chart-search" class="chart-search-input"
+                 placeholder="Search chart…" oninput="searchChart(this.value)" autocomplete="off" />
+          <button class="chart-search-clear" id="chart-search-clear"
+                  onclick="clearChartSearch()" style="display:none" title="Clear search">✕</button>
+        </div>
         <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
           💡 Suggest Connections
         </button>
@@ -382,7 +409,12 @@
       </div>
       <div>
         <label>Other person</label>
-        <select id="ql-other-person"><option value="">— select a person —</option></select>
+        <div class="person-picker">
+        <input type="text" class="pp-input" placeholder="Type to search a person…" autocomplete="off"
+               oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+        <input type="hidden" id="ql-other-person" />
+        <div class="pp-dropdown"></div>
+      </div>
       </div>
     </div>
     <div class="modal-actions" style="border-top:none;padding-top:0;margin-top:14px">

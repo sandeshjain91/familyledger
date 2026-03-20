@@ -345,18 +345,8 @@ function openQuickLinkModal(newId, newName, newGender) {
   document.getElementById('ql-new-person-label').innerHTML =
     `<span style="color:${color};font-weight:700;">${genderIcon} ${newName}</span>`;
 
-  // Populate the "other person" select with all current nodes except the new one
-  const sel = document.getElementById('ql-other-person');
-  sel.innerHTML = '<option value="">— select a person —</option>';
-  graphData.nodes
-    .filter(n => n.id !== newId)
-    .sort((a,b) => a.name.localeCompare(b.name))
-    .forEach(n => {
-      const opt = document.createElement('option');
-      opt.value = n.id;
-      opt.textContent = n.name;
-      sel.appendChild(opt);
-    });
+  // Clear the other-person picker (it reads graphData.nodes dynamically, excluding _quickLinkPersonId)
+  ppClearById('ql-other-person');
 
   // Reset rel type
   document.getElementById('ql-rel-type').value = '';
@@ -1267,14 +1257,13 @@ function selectNode(id) {
   // ── Pick-mode: fill the waiting field instead of opening info panel ──
   if (pickMode) {
     const { field } = pickMode;
-    document.getElementById(field).value = id;
+    ppSetById(field, id);
     const name = nodeById.get(id)?.name || 'Person';
     exitPickMode();
     toast(`${name} selected`, 'success');
-    // Auto-run trace when both endpoints are set
     if (field === 'trace-p1' || field === 'trace-p2') {
-      const p1 = document.getElementById('trace-p1').value;
-      const p2 = document.getElementById('trace-p2').value;
+      const p1 = document.getElementById('trace-p1')?.value;
+      const p2 = document.getElementById('trace-p2')?.value;
       if (p1 && p2) runTrace();
     }
     return;
@@ -1832,16 +1821,166 @@ function renderPeopleList(nodes) {
   wrapper.innerHTML = `<div class="people-list-inner">${html}</div>`;
 }
 
-function refreshPersonSelects() {
-  const sorted = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
-  const opts   = sorted.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('');
+/* ════════════════════════════════════════════════════════════
+   PERSON PICKER  –  searchable autocomplete replacing <select>
+════════════════════════════════════════════════════════════ */
 
-  ['rel-p1', 'rel-p2', 'trace-p1', 'trace-p2'].forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = `<option value="">Select person *</option>` + opts;
-    sel.value = cur;
+/** Show (or refresh) the dropdown for the picker that owns inputEl. */
+function ppOpen(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (wrap) _ppShowDrop(wrap, inputEl.value);
+}
+
+/** Filter dropdown as the user types; clear stale selection if text changed. */
+function ppFilter(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (!wrap) return;
+  const hid = wrap.querySelector('input[type=hidden]');
+  if (hid?.value) {
+    const cur = graphData.nodes.find(n => n.id === hid.value);
+    if (cur && inputEl.value !== cur.name) hid.value = '';
+  }
+  _ppShowDrop(wrap, inputEl.value);
+}
+
+/** Close dropdown on blur; if nothing selected clear the text. */
+function ppBlur(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (!wrap) return;
+  setTimeout(() => {
+    const drop = wrap.querySelector('.pp-dropdown');
+    if (drop) drop.style.display = 'none';
+    const hid = wrap.querySelector('input[type=hidden]');
+    if (hid && !hid.value) inputEl.value = '';
+  }, 160);
+}
+
+/** Called via onmousedown on a .pp-option — sets the hidden value and closes. */
+function ppSelect(hidEl, personId) {
+  const node = graphData.nodes.find(n => n.id === personId);
+  if (!node || !hidEl) return;
+  hidEl.value = personId;
+  const wrap = hidEl.closest('.person-picker');
+  if (wrap) {
+    const inp = wrap.querySelector('.pp-input');
+    if (inp) inp.value = node.name;
+    const drop = wrap.querySelector('.pp-dropdown');
+    if (drop) drop.style.display = 'none';
+  }
+  // Auto-run trace when both trace fields are filled
+  if (hidEl.id === 'trace-p1' || hidEl.id === 'trace-p2') {
+    const p1 = document.getElementById('trace-p1')?.value;
+    const p2 = document.getElementById('trace-p2')?.value;
+    if (p1 && p2) runTrace();
+  }
+}
+
+/** Set a picker by the hidden input's id — used from pick-mode and external code. */
+function ppSetById(hiddenId, personId) {
+  const hEl = document.getElementById(hiddenId);
+  if (!hEl) return;
+  const node = graphData.nodes.find(n => n.id === personId);
+  if (!node) return;
+  hEl.value = personId;
+  const wrap = hEl.closest('.person-picker');
+  if (!wrap) return;
+  const inp = wrap.querySelector('.pp-input');
+  if (inp) inp.value = node.name;
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (drop) drop.style.display = 'none';
+}
+
+/** Clear a picker by the hidden input's id. */
+function ppClearById(hiddenId) {
+  const hEl = document.getElementById(hiddenId);
+  if (!hEl) return;
+  hEl.value = '';
+  const wrap = hEl.closest('.person-picker');
+  if (!wrap) return;
+  const inp = wrap.querySelector('.pp-input');
+  if (inp) inp.value = '';
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (drop) drop.style.display = 'none';
+}
+
+/** Build and show the dropdown list filtered by query. */
+function _ppShowDrop(wrap, query) {
+  const hid  = wrap.querySelector('input[type=hidden]');
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (!drop) return;
+
+  let nodes = [...graphData.nodes];
+  // In quick-link modal, exclude the newly added person
+  if (hid?.id === 'ql-other-person' && _quickLinkPersonId) {
+    nodes = nodes.filter(n => n.id !== _quickLinkPersonId);
+  }
+  nodes.sort((a, b) => a.name.localeCompare(b.name));
+
+  const q       = (query || '').toLowerCase().trim();
+  const matches = q ? nodes.filter(n => n.name.toLowerCase().includes(q)) : nodes;
+
+  if (!matches.length) {
+    drop.innerHTML = '<div class="pp-empty">No matches</div>';
+    drop.style.display = 'block';
+    return;
+  }
+
+  const curVal  = hid?.value || '';
+  const hidId   = hid?.id    || '';
+  drop.innerHTML = matches.map(n => {
+    const sel = n.id === curVal ? ' selected' : '';
+    // Use a safe data attribute approach; hidId cannot contain quotes in practice
+    return `<div class="pp-option${sel}" onmousedown="ppSelect(document.getElementById('${hidId}'),'${n.id}')">${escapeHtml(n.name)}</div>`;
+  }).join('');
+  drop.style.display = 'block';
+}
+
+/* ════════════════════════════════════════════════════════════
+   CHART SEARCH  –  highlight & pan to matching nodes
+════════════════════════════════════════════════════════════ */
+
+function searchChart(query) {
+  const q       = (query || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('chart-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'inline-flex' : 'none';
+
+  if (!q) {
+    nodesLayer?.selectAll('.node-g').classed('search-match search-fade', false);
+    return;
+  }
+
+  const matches  = graphData.nodes.filter(n => n.name.toLowerCase().includes(q));
+  const matchIds = new Set(matches.map(n => n.id));
+
+  nodesLayer.selectAll('.node-g')
+    .classed('search-match', d => matchIds.has(d.id))
+    .classed('search-fade',  d => !matchIds.has(d.id));
+
+  // Pan to first match
+  if (matches.length) {
+    const first = matches[0];
+    const svgEl = document.getElementById('chart-svg');
+    const w = svgEl.clientWidth, h = svgEl.clientHeight;
+    const t = d3.zoomTransform(svgEl);
+    const tx = w / 2 - (first.x || 0) * t.k;
+    const ty = h / 2 - (first.y || 0) * t.k;
+    d3.select(svgEl).transition().duration(400)
+      .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(t.k));
+  }
+}
+
+function clearChartSearch() {
+  const inp = document.getElementById('chart-search');
+  if (inp) { inp.value = ''; searchChart(''); }
+}
+
+function refreshPersonSelects() {
+  // Pickers read from graphData.nodes dynamically – just evict stale selections
+  ['rel-p1', 'rel-p2', 'trace-p1', 'trace-p2'].forEach(hidId => {
+    const hEl = document.getElementById(hidId);
+    if (hEl?.value && !graphData.nodes.find(n => n.id === hEl.value)) {
+      ppClearById(hidId);
+    }
   });
 }
 
@@ -1923,8 +2062,8 @@ function clearTrace() {
   nodesLayer.selectAll('.node-g').classed('in-path start-node end-node path-faded', false);
   linksLayer.selectAll('.link-g').classed('path-active path-faded', false);
   document.getElementById('trace-result').innerHTML = '';
-  document.getElementById('trace-p1').value = '';
-  document.getElementById('trace-p2').value = '';
+  ppClearById('trace-p1');
+  ppClearById('trace-p2');
 }
 
 /** Applies CSS classes to nodes/links to visualise the path. */
