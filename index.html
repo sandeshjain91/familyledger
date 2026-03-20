@@ -342,6 +342,41 @@
   </div>
 </div>
 
+<!-- Quick-Link Modal (auto-shown after adding a person) -->
+<div id="modal-quick-link" class="modal-backdrop" style="display:none" onclick="closeQuickLinkModal()">
+  <div class="modal-box ql-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>🔗 Link to Family</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">
+          Connect <span id="ql-new-person-label"></span> to an existing person
+        </p>
+      </div>
+      <button class="close-btn" onclick="closeQuickLinkModal()">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <div>
+        <label>New person is…</label>
+        <select id="ql-rel-type">
+          <option value="">Relationship type *</option>
+          <option value="parent">Parent of →</option>
+          <option value="child">Child of →</option>
+          <option value="sibling">Sibling of ↔</option>
+          <option value="spouse">Spouse of ↔</option>
+        </select>
+      </div>
+      <div>
+        <label>Other person</label>
+        <select id="ql-other-person"><option value="">— select a person —</option></select>
+      </div>
+    </div>
+    <div class="modal-actions" style="border-top:none;padding-top:0;margin-top:14px">
+      <button id="ql-link-btn" class="btn-primary" onclick="handleQuickLink()">+ Link</button>
+      <button class="btn-ghost" onclick="closeQuickLinkModal()">Skip</button>
+    </div>
+  </div>
+</div>
+
 <!-- Conflicts Modal -->
 <div id="modal-conflicts" class="modal-backdrop" style="display:none" onclick="closeModal('modal-conflicts')">
   <div class="modal-box" onclick="event.stopPropagation()">

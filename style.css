@@ -944,6 +944,7 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   animation: slideUp .2s ease;
 }
 .modal-box.wide { width: 680px; }
+.modal-box.ql-box { width: 360px; }
 @keyframes slideUp { from { transform: translateY(16px); opacity: 0 } to { transform: none; opacity: 1 } }
 
 .modal-header {

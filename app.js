@@ -309,7 +309,7 @@ async function handleAddPerson(e) {
   if (!name) return;
 
   try {
-    await db.collection('nodes').add({
+    const docRef = await db.collection('nodes').add({
       name,
       gender,
       dateOfBirth: dob,
@@ -319,8 +319,107 @@ async function handleAddPerson(e) {
     });
     document.getElementById('form-add-person').reset();
     toast('Person added!', 'success');
+
+    // If there are already other people, prompt to link
+    if (graphData.nodes.length > 0) {
+      openQuickLinkModal(docRef.id, name, gender);
+    }
   } catch (err) {
     toast('Error: ' + err.message, 'error');
+  }
+}
+
+/* ── Quick-Link Modal (auto-opens after adding a person) ── */
+let _quickLinkPersonId = null;
+
+function openQuickLinkModal(newId, newName, newGender) {
+  _quickLinkPersonId = newId;
+
+  // Set the header label
+  const genderIcon = newGender === 'female' ? '♀' : newGender === 'male' ? '♂' : '⚧';
+  const color = newGender === 'female' ? '#ec4899' : newGender === 'male' ? '#3b82f6' : '#8b5cf6';
+  document.getElementById('ql-new-person-label').innerHTML =
+    `<span style="color:${color};font-weight:700;">${genderIcon} ${newName}</span>`;
+
+  // Populate the "other person" select with all current nodes except the new one
+  const sel = document.getElementById('ql-other-person');
+  sel.innerHTML = '<option value="">— select a person —</option>';
+  graphData.nodes
+    .filter(n => n.id !== newId)
+    .sort((a,b) => a.name.localeCompare(b.name))
+    .forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n.id;
+      opt.textContent = n.name;
+      sel.appendChild(opt);
+    });
+
+  // Reset rel type
+  document.getElementById('ql-rel-type').value = '';
+
+  document.getElementById('modal-quick-link').style.display = 'flex';
+}
+
+function closeQuickLinkModal() {
+  document.getElementById('modal-quick-link').style.display = 'none';
+  _quickLinkPersonId = null;
+}
+
+async function handleQuickLink() {
+  const otherId = document.getElementById('ql-other-person').value;
+  const relType = document.getElementById('ql-rel-type').value;
+  if (!otherId || !relType) {
+    toast('Please select a person and relationship type', 'error');
+    return;
+  }
+  if (!_quickLinkPersonId) return;
+
+  const btn = document.getElementById('ql-link-btn');
+  btn.disabled = true;
+  btn.textContent = 'Linking…';
+
+  try {
+    // Reuse the same batch-write logic as handleAddRelationship
+    const p1Id = _quickLinkPersonId;
+    const p2Id = otherId;
+    const type = relType;
+
+    const symmetric = ['sibling', 'spouse'];
+    const isSymmetric = symmetric.includes(type);
+    const inverseMap = { parent: 'child', child: 'parent' };
+    const inverseType = isSymmetric ? type : inverseMap[type];
+
+    const batch = db.batch();
+    const relCol = db.collection('relationships');
+
+    const fwdRef = relCol.doc();
+    batch.set(fwdRef, {
+      person1Id: p1Id, person2Id: p2Id,
+      relationshipType: type,
+      isReverse: false,
+      createdBy: currentUser.uid,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    if (!isSymmetric) {
+      const revRef = relCol.doc();
+      batch.set(revRef, {
+        person1Id: p2Id, person2Id: p1Id,
+        relationshipType: inverseType,
+        isReverse: true,
+        createdBy: currentUser.uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    await batch.commit();
+    toast('Relationship linked! ✓', 'success');
+    closeQuickLinkModal();
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Link';
   }
 }
 
