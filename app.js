@@ -2589,14 +2589,24 @@ document.addEventListener('keydown', (e) => {
 
 /** Toggle the left panel open / closed. */
 function togglePanel() {
-  const panel  = document.getElementById('left-panel');
-  const btn    = document.getElementById('hamburger-btn');
-  const body   = document.querySelector('.app-body');
-  const collapsed = panel.classList.toggle('collapsed');
-  btn.classList.toggle('open', collapsed);
-  body.classList.toggle('panel-collapsed', collapsed);
-  // Re-fit the chart so it fills the new width after the transition
-  setTimeout(fitView, 300);
+  const panel   = document.getElementById('left-panel');
+  const btn     = document.getElementById('hamburger-btn');
+  const body    = document.querySelector('.app-body');
+  const overlay = document.getElementById('panel-overlay');
+  const mobile  = window.innerWidth <= 768;
+
+  if (mobile) {
+    // Mobile: slide drawer in/out with mobile-open class
+    const open = panel.classList.toggle('mobile-open');
+    if (overlay) overlay.classList.toggle('visible', open);
+  } else {
+    // Desktop: push-collapse
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.classList.toggle('open', collapsed);
+    body.classList.toggle('panel-collapsed', collapsed);
+    if (overlay) overlay.classList.remove('visible');
+    setTimeout(fitView, 300);
+  }
 }
 
 /** Simple XSS-safe string. */
