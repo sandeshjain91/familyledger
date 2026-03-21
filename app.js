@@ -1934,6 +1934,22 @@ function clearChartSearch() {
   searchChart('');
 }
 
+function toggleHdrSearch(forceOpen) {
+  const bar = document.getElementById('hdr-search-bar');
+  const inp = document.getElementById('hdr-search-input');
+  const btn = document.getElementById('hdr-search-btn');
+  if (!bar) return;
+  const open = forceOpen !== undefined ? forceOpen : !bar.classList.contains('open');
+  bar.classList.toggle('open', open);
+  if (btn) btn.style.opacity = open ? '1' : '';
+  if (open) {
+    setTimeout(() => inp && inp.focus(), 80);
+  } else {
+    if (inp) inp.value = '';
+    searchChart('');
+  }
+}
+
 function refreshPersonSelects() {
   // Pickers read from graphData.nodes dynamically – just evict stale selections
   ['rel-p1', 'rel-p2', 'trace-p1', 'trace-p2'].forEach(hidId => {

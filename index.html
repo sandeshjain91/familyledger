@@ -76,8 +76,17 @@
     </div>
     <!-- Mobile-only: compact action buttons inside the header -->
     <div class="header-center">
+      <button class="hdr-icon-btn" id="hdr-search-btn" onclick="toggleHdrSearch()" title="Search chart">🔍</button>
       <button class="hdr-icon-btn" onclick="openSuggestionsModal()" title="Suggest Connections">💡</button>
       <button class="hdr-icon-btn" onclick="rearrangeChart()" title="Rearrange">⇄</button>
+    </div>
+    <!-- Mobile search bar: slides down when search icon tapped -->
+    <div class="hdr-search-bar" id="hdr-search-bar">
+      <input type="text" id="hdr-search-input" class="hdr-search-input"
+             placeholder="Search chart…" autocomplete="off"
+             oninput="searchChart(this.value)"
+             onkeydown="if(event.key==='Escape')toggleHdrSearch(false)" />
+      <button class="hdr-search-close" onclick="toggleHdrSearch(false)">✕</button>
     </div>
     <div class="header-right">
       <span id="hdr-name"></span>

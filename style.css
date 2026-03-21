@@ -225,6 +225,36 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 }
 .hdr-icon-btn:active { background: rgba(255,255,255,0.25); }
 
+/* ─── Mobile header search bar ─── */
+.hdr-search-bar {
+  display: none; /* shown via JS on mobile */
+  position: fixed;
+  top: 52px; /* just below header */
+  left: 0; right: 0;
+  background: #1a1b2e;
+  padding: 8px 12px;
+  gap: 8px;
+  align-items: center;
+  z-index: 198;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.hdr-search-bar.open { display: flex; }
+.hdr-search-input {
+  flex: 1;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 15px;
+  padding: 8px 12px;
+  outline: none;
+}
+.hdr-search-input::placeholder { color: rgba(255,255,255,0.45); }
+.hdr-search-close {
+  background: none; border: none; color: rgba(255,255,255,0.7);
+  font-size: 18px; cursor: pointer; padding: 4px 8px;
+}
+
 /* ─── Hamburger button ─── */
 .hamburger-btn {
   display: flex; flex-direction: column; justify-content: center; gap: 5px;
