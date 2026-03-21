@@ -205,10 +205,13 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   z-index: 100;
   flex-shrink: 0;
 }
-.header-left  { display: flex; align-items: center; gap: 10px; }
-.header-right { display: flex; align-items: center; gap: 12px; }
+.header-left  { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.header-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .header-logo  { font-size: 22px; }
 .header-title { font-size: 16px; font-weight: 700; letter-spacing: .3px; }
+
+/* Header action bar (search + suggest + rearrange) — desktop: hidden (lives below chart) */
+.header-action-bar { display: none; }
 
 /* ─── Hamburger button ─── */
 .hamburger-btn {
@@ -1344,11 +1347,52 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
     background: transparent !important;
   }
 
-  /* ── Header: tighten on mobile so hamburger isn't crowded out ── */
-  #app-header { padding: 0 10px; }
-  .header-title { font-size: 13px; }
+  /* ── Header: replace title with action bar on mobile ── */
+  #app-header { padding: 0 8px; gap: 6px; }
+  .header-title { display: none; }       /* hide "Global Pedigree Chart" on mobile */
+  .header-logo  { display: none; }       /* hide tree emoji too — save space */
   #hdr-name { display: none; }          /* hide username text on mobile */
   .btn-ghost.sm { font-size: 11px; padding: 4px 8px; }
+
+  /* ── Header action bar: visible on mobile, fills available space ── */
+  .header-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+  }
+  .header-action-bar .chart-search-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+  .header-action-bar .chart-search-input {
+    width: 100%;
+    font-size: 14px;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.25);
+    color: #fff;
+    border-radius: 8px;
+  }
+  .header-action-bar .chart-search-input::placeholder { color: rgba(255,255,255,0.6); }
+  .header-action-bar .chart-search-icon { color: rgba(255,255,255,0.7); font-size: 14px; }
+  .header-action-bar .chart-search-clear { color: rgba(255,255,255,0.8); }
+  .header-action-bar .suggest-btn,
+  .header-action-bar .rearrange-btn {
+    padding: 6px 8px;
+    font-size: 16px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    color: #fff;
+    white-space: nowrap;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* ── Desktop chart-action-bar: hide on mobile (replaced by header bar) ── */
+  .chart-action-bar { display: none; }
 
   /* ── Left panel becomes a fixed drawer (below 52px header) ── */
   .left-panel {

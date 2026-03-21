@@ -1900,8 +1900,11 @@ function _ppShowDrop(wrap, query) {
 
 function searchChart(query) {
   const q       = (query || '').toLowerCase().trim();
-  const clearBtn = document.getElementById('chart-search-clear');
-  if (clearBtn) clearBtn.style.display = q ? 'inline-flex' : 'none';
+  // Sync both clear buttons (desktop bar + mobile header)
+  ['chart-search-clear', 'chart-search-clear-hdr'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = q ? 'inline-flex' : 'none';
+  });
 
   if (!q) {
     nodesLayer?.selectAll('.node-g').classed('search-match search-fade', false);
@@ -1929,8 +1932,11 @@ function searchChart(query) {
 }
 
 function clearChartSearch() {
-  const inp = document.getElementById('chart-search');
-  if (inp) { inp.value = ''; searchChart(''); }
+  ['chart-search', 'chart-search-hdr'].forEach(id => {
+    const inp = document.getElementById(id);
+    if (inp) inp.value = '';
+  });
+  searchChart('');
 }
 
 function refreshPersonSelects() {
