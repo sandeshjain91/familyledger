@@ -229,7 +229,7 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 .hdr-search-bar {
   display: none; /* shown via JS on mobile */
   position: fixed;
-  top: 52px; /* just below header */
+  top: 52px; /* fallback; JS sets exact value from header.getBoundingClientRect().bottom */
   left: 0; right: 0;
   background: #1a1b2e;
   padding: 8px 12px;

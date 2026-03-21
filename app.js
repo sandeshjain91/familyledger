@@ -1938,8 +1938,11 @@ function toggleHdrSearch(forceOpen) {
   const bar = document.getElementById('hdr-search-bar');
   const inp = document.getElementById('hdr-search-input');
   const btn = document.getElementById('hdr-search-btn');
+  const hdr = document.getElementById('app-header');
   if (!bar) return;
   const open = forceOpen !== undefined ? forceOpen : !bar.classList.contains('open');
+  // Position bar flush below the real header
+  if (hdr) bar.style.top = hdr.getBoundingClientRect().bottom + 'px';
   bar.classList.toggle('open', open);
   if (btn) btn.style.opacity = open ? '1' : '';
   if (open) {
