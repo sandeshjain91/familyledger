@@ -222,6 +222,7 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 .hamburger-btn:hover { background: rgba(255,255,255,.15); }
 .hamburger-btn span {
   display: block;
+  width: 22px;
   height: 2px;
   background: #fff;
   border-radius: 2px;
@@ -1334,14 +1335,20 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 
 @media (max-width: 768px) {
 
-  /* ── Hamburger bars: always white ── */
-  .hamburger-btn span { background: #fff !important; }
-
-  /* ── Hamburger stays in header flow (no fixed repositioning) ── */
+  /* ── Hamburger bars: always white, always visible ── */
+  .hamburger-btn span { display: block !important; width: 22px !important; background: #fff !important; }
   .hamburger-btn {
     position: static !important;
+    display: flex !important;
+    flex-shrink: 0;
     background: transparent !important;
   }
+
+  /* ── Header: tighten on mobile so hamburger isn't crowded out ── */
+  #app-header { padding: 0 10px; }
+  .header-title { font-size: 13px; }
+  #hdr-name { display: none; }          /* hide username text on mobile */
+  .btn-ghost.sm { font-size: 11px; padding: 4px 8px; }
 
   /* ── Left panel becomes a fixed drawer (below 52px header) ── */
   .left-panel {
