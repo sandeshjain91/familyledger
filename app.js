@@ -575,13 +575,15 @@ function initGraph() {
   // Prevent double-click zoom (we use double-click for nodes)
   svgSel.on('dblclick.zoom', null);
 
-  // Deselect node/link on background click; also cancel pick mode
-  // _nodeTapped guard + target check prevent mobile ghost-click from closing info panel
+  // Deselect node/link on background click; also cancel pick mode.
+  // On mobile we never auto-close on SVG tap — ghost clicks from D3 drag make it
+  // impossible to distinguish a real background tap from a node tap aftermath.
+  // Mobile users close the info panel with the ✕ button instead.
   svgSel.on('click', (event) => {
-    if (_nodeTapped) return;
-    // If the click landed inside a node or link, ignore (stopPropagation may have been missed)
-    if (event.target && event.target.closest && event.target.closest('.node-g')) return;
     if (pickMode) { exitPickMode(); return; }
+    if (window.innerWidth <= 768) return;          // mobile: ignore SVG background taps
+    if (_nodeTapped) return;
+    if (event.target && event.target.closest && event.target.closest('.node-g')) return;
     deselectNode();
     deselectLink();
   });

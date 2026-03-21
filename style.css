@@ -1450,6 +1450,17 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 
   /* ── Safe area padding for notch phones ── */
   .chart-action-bar { padding-top: max(6px, env(safe-area-inset-top, 6px)); }
+
+  /* ── Info panel close button: bigger tap target on mobile ── */
+  .ip-close {
+    font-size: 18px !important;
+    padding: 6px 10px !important;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
