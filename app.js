@@ -1900,8 +1900,9 @@ function _ppShowDrop(wrap, query) {
 
 function searchChart(query) {
   const q       = (query || '').toLowerCase().trim();
-  const clearBtn = document.getElementById('chart-search-clear');
-  if (clearBtn) clearBtn.style.display = q ? 'inline-flex' : 'none';
+  ['chart-search-clear', 'chart-search-clear-hdr'].forEach(id => {
+    const b = document.getElementById(id); if (b) b.style.display = q ? 'inline-flex' : 'none';
+  });
 
   if (!q) {
     nodesLayer?.selectAll('.node-g').classed('search-match search-fade', false);
@@ -1929,8 +1930,9 @@ function searchChart(query) {
 }
 
 function clearChartSearch() {
-  const inp = document.getElementById('chart-search');
-  if (inp) inp.value = '';
+  ['chart-search', 'chart-search-hdr'].forEach(id => {
+    const inp = document.getElementById(id); if (inp) inp.value = '';
+  });
   searchChart('');
 }
 

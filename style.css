@@ -205,11 +205,25 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   z-index: 100;
   flex-shrink: 0;
 }
-.header-left  { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.header-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.header-logo  { font-size: 22px; }
-.header-title { font-size: 16px; font-weight: 700; letter-spacing: .3px; }
+.header-left   { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.header-center { display: none; } /* shown on mobile only */
+.header-right  { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.header-logo   { font-size: 22px; }
+.header-title  { font-size: 16px; font-weight: 700; letter-spacing: .3px; }
 
+/* Header icon buttons (mobile action bar) */
+.hdr-icon-btn {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 16px;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.hdr-icon-btn:active { background: rgba(255,255,255,0.25); }
 
 /* ─── Hamburger button ─── */
 .hamburger-btn {
@@ -1345,53 +1359,38 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
     background: transparent !important;
   }
 
-  /* ── Header: compact on mobile ── */
+  /* ── Header: action bar inside, hide title/logo ── */
   #app-header { padding: 0 8px; gap: 6px; }
-  .header-title { display: none; }       /* hide "Global Pedigree Chart" — action bar replaces it */
-  .header-logo  { display: none; }       /* hide tree emoji to save space */
-  #hdr-name { display: none; }
+  .header-title { display: none; }
+  .header-logo  { display: none; }
+  #hdr-name     { display: none; }
   .btn-ghost.sm { font-size: 11px; padding: 4px 8px; }
 
-  /* ── Chart action bar: fixed strip just below the header on mobile ── */
-  .chart-action-bar {
-    display: flex !important;
-    position: fixed;
-    top: 52px;
-    left: 0;
-    right: 0;
-    z-index: 150;
-    background: var(--panel-bg, #1e2235);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding: 6px 8px;
-    gap: 6px;
+  /* ── Show header-center (search + icon buttons) ── */
+  .header-center {
+    display: flex;
     align-items: center;
-    flex-wrap: nowrap;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
   }
-  .chart-action-bar .chart-search-wrap { flex: 1; min-width: 0; }
-  .chart-action-bar .chart-search-input {
+  .header-center .chart-search-wrap { flex: 1; min-width: 0; }
+  .header-center .chart-search-input {
     width: 100%;
     font-size: 14px;
-    padding: 6px 8px;
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.2);
+    padding: 5px 8px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.22);
     color: #fff;
     border-radius: 8px;
   }
-  .chart-action-bar .chart-search-input::placeholder { color: rgba(255,255,255,0.5); }
-  .chart-action-bar .chart-search-icon { color: rgba(255,255,255,0.6); font-size: 13px; }
-  .chart-action-bar .chart-search-clear { color: rgba(255,255,255,0.7); background: none; border: none; }
-  .chart-action-bar .suggest-btn,
-  .chart-action-bar .rearrange-btn {
-    flex-shrink: 0;
-    padding: 6px 8px;
-    font-size: 13px;
-    white-space: nowrap;
-    min-height: 36px;
-  }
+  .header-center .chart-search-input::placeholder { color: rgba(255,255,255,0.5); }
+  .header-center .chart-search-icon { color: rgba(255,255,255,0.6); font-size: 13px; }
+  .header-center .chart-search-clear { color: rgba(255,255,255,0.7); background: none; border: none; padding: 0 4px; }
 
-  /* ── Push chart area down so action bar doesn't overlap it ── */
-  .chart-area { padding-top: 52px; }
+  /* ── Hide the desktop chart-action-bar strip on mobile ── */
+  .chart-action-bar { display: none !important; }
+  .chart-area { padding-top: 0; }
 
   /* ── Left panel becomes a fixed drawer (below 52px header) ── */
   .left-panel {
