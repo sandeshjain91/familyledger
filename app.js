@@ -35,6 +35,7 @@ let currentSuggestions  = [];   // suggestions computed by generateSuggestions()
 let pickMode            = null; // { field: 'rel-p1'|'rel-p2'|'trace-p1'|'trace-p2', label } when active
 let _nodeTapped         = false; // guard against mobile ghost-click on SVG background
 let _nodeTapTimer       = null;  // timer handle for clearing _nodeTapped
+let _infoPanelShownAt   = 0;     // timestamp (ms) when info panel was last shown
 
 // Graph data (kept in sync via onSnapshot)
 const graphData = {
@@ -1243,6 +1244,8 @@ function selectNode(id) {
 }
 
 function deselectNode() {
+  // On mobile: if the panel was shown within the last 800ms, ignore stray close calls
+  if (window.innerWidth <= 768 && (Date.now() - _infoPanelShownAt) < 800) return;
   selectedNodeId = null;
   nodesLayer.selectAll('.node-g').classed('selected connected faded', false);
   linksLayer.selectAll('.link-g').classed('link-active link-faded', false);
@@ -1357,6 +1360,7 @@ async function deleteSelectedLink() {
 function showInfoPanel(nodeId) {
   const node = nodeById.get(nodeId);
   if (!node) return;
+  _infoPanelShownAt = Date.now(); // record when panel was shown (used by mobile ghost-click guard)
 
   // Header
   document.getElementById('ip-name').textContent   = node.name;
