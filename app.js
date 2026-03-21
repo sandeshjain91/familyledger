@@ -49,6 +49,9 @@ let svgEl, svgSel, zoomBehaviour, rootGroup, linksLayer, nodesLayer, simulation;
 // Track whether the graph has been rendered once (to avoid re-centering on every update)
 let graphInitialised = false;
 
+// Which link-type categories are currently hidden (values: 'parent','sibling','spouse','in-law')
+const hiddenLinkTypes = new Set();
+
 // Node visual dimensions
 const NODE_W  = 100;   // rectangle width
 const NODE_H  = 60;    // rectangle height
@@ -309,7 +312,7 @@ async function handleAddPerson(e) {
   if (!name) return;
 
   try {
-    await db.collection('nodes').add({
+    const docRef = await db.collection('nodes').add({
       name,
       gender,
       dateOfBirth: dob,
@@ -319,8 +322,101 @@ async function handleAddPerson(e) {
     });
     document.getElementById('form-add-person').reset();
     toast('Person added!', 'success');
+    logActivity('add_person', { personId: docRef.id, personName: name, gender, dob });
+
+    // If there are already other people, prompt to link
+    if (graphData.nodes.length > 0) {
+      openQuickLinkModal(docRef.id, name, gender);
+    }
   } catch (err) {
     toast('Error: ' + err.message, 'error');
+  }
+}
+
+/* ── Quick-Link Modal (auto-opens after adding a person) ── */
+let _quickLinkPersonId = null;
+
+function openQuickLinkModal(newId, newName, newGender) {
+  _quickLinkPersonId = newId;
+
+  // Set the header label
+  const genderIcon = newGender === 'female' ? '♀' : newGender === 'male' ? '♂' : '⚧';
+  const color = newGender === 'female' ? '#ec4899' : newGender === 'male' ? '#3b82f6' : '#8b5cf6';
+  document.getElementById('ql-new-person-label').innerHTML =
+    `<span style="color:${color};font-weight:700;">${genderIcon} ${newName}</span>`;
+
+  // Clear the other-person picker (it reads graphData.nodes dynamically, excluding _quickLinkPersonId)
+  ppClearById('ql-other-person');
+
+  // Reset rel type
+  document.getElementById('ql-rel-type').value = '';
+
+  document.getElementById('modal-quick-link').style.display = 'flex';
+}
+
+function closeQuickLinkModal() {
+  document.getElementById('modal-quick-link').style.display = 'none';
+  _quickLinkPersonId = null;
+}
+
+async function handleQuickLink() {
+  const otherId = document.getElementById('ql-other-person').value;
+  const relType = document.getElementById('ql-rel-type').value;
+  if (!otherId || !relType) {
+    toast('Please select a person and relationship type', 'error');
+    return;
+  }
+  if (!_quickLinkPersonId) return;
+
+  const btn = document.getElementById('ql-link-btn');
+  btn.disabled = true;
+  btn.textContent = 'Linking…';
+
+  try {
+    // Reuse the same batch-write logic as handleAddRelationship
+    const p1Id = _quickLinkPersonId;
+    const p2Id = otherId;
+    const type = relType;
+
+    const symmetric = ['sibling', 'spouse'];
+    const isSymmetric = symmetric.includes(type);
+    const inverseMap = { parent: 'child', child: 'parent' };
+    const inverseType = isSymmetric ? type : inverseMap[type];
+
+    const batch = db.batch();
+    const relCol = db.collection('relationships');
+
+    const fwdRef = relCol.doc();
+    batch.set(fwdRef, {
+      person1Id: p1Id, person2Id: p2Id,
+      relationshipType: type,
+      isReverse: false,
+      createdBy: currentUser.uid,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    if (!isSymmetric) {
+      const revRef = relCol.doc();
+      batch.set(revRef, {
+        person1Id: p2Id, person2Id: p1Id,
+        relationshipType: inverseType,
+        isReverse: true,
+        createdBy: currentUser.uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    await batch.commit();
+    toast('Relationship linked! ✓', 'success');
+    const p1n = nodeById.get(p1Id)?.name || p1Id;
+    const p2n = nodeById.get(p2Id)?.name || p2Id;
+    logActivity('add_relationship', { person1Id: p1Id, person1Name: p1n, person2Id: p2Id, person2Name: p2n, relationshipType: type, source: 'quick-link' });
+    closeQuickLinkModal();
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Link';
   }
 }
 
@@ -375,6 +471,9 @@ async function handleAddRelationship(e) {
     await batch.commit();
     document.getElementById('form-add-rel').reset();
     toast(conflict ? '⚠️ Relationship added (conflict flagged).' : 'Relationship added!', conflict ? '' : 'success');
+    const p1n = nodeById.get(p1Id)?.name || p1Id;
+    const p2n = nodeById.get(p2Id)?.name || p2Id;
+    logActivity('add_relationship', { person1Id: p1Id, person1Name: p1n, person2Id: p2Id, person2Name: p2n, relationshipType: type, conflicted: conflict });
   } catch (err) {
     toast('Error: ' + err.message, 'error');
   }
@@ -503,6 +602,33 @@ function initGraph() {
    Called every time Firestore snapshot fires.
 ════════════════════════════════════════════════════════════ */
 
+/** Returns true if a link should be visually hidden based on the current filter. */
+function isLinkTypeHidden(relType) {
+  if (!relType) return false;
+  if (hiddenLinkTypes.has('in-law')  && relType.endsWith('-in-law'))                   return true;
+  if (hiddenLinkTypes.has('parent')  && (relType === 'parent' || relType === 'child')) return true;
+  if (hiddenLinkTypes.has('sibling') && relType === 'sibling')                         return true;
+  if (hiddenLinkTypes.has('spouse')  && relType === 'spouse')                          return true;
+  return false;
+}
+
+/** Toggle visibility of a link-type category and refresh the chart display. */
+function toggleLinkType(type) {
+  if (hiddenLinkTypes.has(type)) hiddenLinkTypes.delete(type);
+  else hiddenLinkTypes.add(type);
+
+  // Update button states in the legend
+  document.querySelectorAll('.leg-toggle').forEach(btn => {
+    btn.classList.toggle('leg-toggle-off', hiddenLinkTypes.has(btn.dataset.type));
+  });
+
+  // Apply/remove hidden class instantly — no simulation restart needed
+  if (linksLayer) {
+    linksLayer.selectAll('.link-g')
+      .classed('link-type-hidden', d => isLinkTypeHidden(d.relationshipType));
+  }
+}
+
 function updateGraph() {
   if (!svgSel) return;
 
@@ -558,6 +684,9 @@ function updateGraph() {
 
   // Restore selection highlight
   linkMerge.classed('link-selected', d => d.id === selectedLinkId);
+
+  // Apply visibility filter
+  linkMerge.classed('link-type-hidden', d => isLinkTypeHidden(d.relationshipType));
 
   // ── NODES ───────────────────────────────────────────────
   const nodeSel = nodesLayer.selectAll('.node-g')
@@ -837,6 +966,179 @@ function zoomIn()   { svgSel.transition().duration(300).call(zoomBehaviour.scale
 function zoomOut()  { svgSel.transition().duration(300).call(zoomBehaviour.scaleBy, 0.67); }
 function resetZoom(){ svgSel.transition().duration(400).call(zoomBehaviour.transform, d3.zoomIdentity); }
 
+/* ════════════════════════════════════════════════════════════
+   9b. REARRANGE – Sugiyama crossing-minimisation layout
+   ─ Y axis : strict BFS generation rows (parents always above children)
+   ─ X axis : Sugiyama barycenter sweep (24 alternating top-down /
+              bottom-up passes) – the standard algorithm for minimising
+              line crossings in hierarchical graphs
+   ─ Couples kept adjacent after every sort pass
+   ─ Final X positions handed to the live simulation so nodes
+     remain draggable and spring back to their row
+════════════════════════════════════════════════════════════ */
+
+function rearrangeChart() {
+  const nodes = graphData.nodes;
+  const links = graphData.links;
+  if (!nodes.length) { toast('Nothing to rearrange', 'error'); return; }
+
+  const btn = document.getElementById('rearrange-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Laying out…'; }
+
+  const HGAP  = 120;   // horizontal px per node slot
+  const VGAP  = 200;   // vertical px between generation rows
+  const SWEEPS = 24;   // barycenter sweep iterations (more = fewer crossings)
+
+  // ── 1. Build relationship maps (non-reverse links only) ────
+  const childrenOf = new Map(nodes.map(n => [n.id, new Set()]));
+  const parentsOf  = new Map(nodes.map(n => [n.id, new Set()]));
+  const spousesOf  = new Map(nodes.map(n => [n.id, new Set()]));
+
+  links.filter(l => !l.isReverse).forEach(({ person1Id: a, person2Id: b, relationshipType: t }) => {
+    if      (t === 'parent') { childrenOf.get(a)?.add(b); parentsOf.get(b)?.add(a); }
+    else if (t === 'child')  { childrenOf.get(b)?.add(a); parentsOf.get(a)?.add(b); }
+    else if (t === 'spouse') { spousesOf.get(a)?.add(b);  spousesOf.get(b)?.add(a); }
+  });
+
+  // ── 2. BFS generation levels ───────────────────────────────
+  const level = new Map();
+
+  function bfsLevel(startId, startLv) {
+    const q = [{ id: startId, lv: startLv }];
+    while (q.length) {
+      const { id, lv } = q.shift();
+      if (level.has(id) && level.get(id) <= lv) continue;
+      level.set(id, lv);
+      childrenOf.get(id)?.forEach(c => q.push({ id: c, lv: lv + 1 }));
+    }
+  }
+  nodes.forEach(n => { if (!parentsOf.get(n.id)?.size) bfsLevel(n.id, 0); });
+  nodes.forEach(n => { if (!level.has(n.id)) bfsLevel(n.id, 0); });
+
+  // Snap married-in nodes (no parents) to spouse's generation
+  let snapDone = false;
+  while (!snapDone) {
+    snapDone = true;
+    nodes.forEach(n => {
+      if (parentsOf.get(n.id)?.size) return;
+      spousesOf.get(n.id)?.forEach(sid => {
+        const sl = level.get(sid);
+        if (sl !== undefined && level.get(n.id) !== sl) {
+          level.set(n.id, sl); snapDone = false;
+        }
+      });
+    });
+  }
+  const minLv = Math.min(...level.values());
+  nodes.forEach(n => level.set(n.id, level.get(n.id) - minLv));
+
+  // ── 3. Group nodes by level ────────────────────────────────
+  const byLevel = new Map();
+  nodes.forEach(n => {
+    const lv = level.get(n.id) ?? 0;
+    if (!byLevel.has(lv)) byLevel.set(lv, []);
+    byLevel.get(lv).push(n.id);
+  });
+  const levels = [...byLevel.keys()].sort((a, b) => a - b);
+
+  // ── 4. Helper: keep couples adjacent inside an ordered list ─
+  function coupleAdjacent(ids) {
+    const result = [], placed = new Set();
+    ids.forEach(id => {
+      if (placed.has(id)) return;
+      result.push(id); placed.add(id);
+      spousesOf.get(id)?.forEach(sid => {
+        if (!placed.has(sid) && ids.includes(sid)) {
+          result.push(sid); placed.add(sid);
+        }
+      });
+    });
+    return result;
+  }
+
+  // ── 5. Initialise per-node "slot" positions (integer index) ─
+  // Start with couples adjacent; positions will be refined by sweeps.
+  const slot = new Map();   // id → float position used for barycenter math
+  levels.forEach(lv => {
+    const ordered = coupleAdjacent(byLevel.get(lv) || []);
+    byLevel.set(lv, ordered);
+    ordered.forEach((id, i) => slot.set(id, i));
+  });
+
+  // ── 6. Barycenter crossing-minimisation sweeps ─────────────
+  // Each sweep: reorder a layer by the mean slot-position of its
+  // neighbours in the adjacent layer, then re-apply couple-adjacency.
+  // Alternating top-down / bottom-up propagates information both ways.
+
+  function baryOf(id, refSlot) {
+    // Neighbours that contribute to crossing count: parents & children
+    const upNb   = [...(parentsOf.get(id)  || [])].filter(p => refSlot.has(p));
+    const downNb = [...(childrenOf.get(id) || [])].filter(c => refSlot.has(c));
+    const nb     = upNb.length ? upNb : downNb;
+    if (!nb.length) return slot.get(id) ?? 0;   // unmoved
+    return nb.reduce((sum, x) => sum + refSlot.get(x), 0) / nb.length;
+  }
+
+  for (let sw = 0; sw < SWEEPS; sw++) {
+    if (sw % 2 === 0) {
+      // Top-down pass
+      for (let li = 1; li < levels.length; li++) {
+        const lv  = levels[li];
+        const ids = [...(byLevel.get(lv) || [])];
+        const snap = new Map(ids.map(id => [id, slot.get(id) ?? 0]));  // snapshot of parent slots
+        ids.sort((a, b) => baryOf(a, snap) - baryOf(b, snap));
+        const reordered = coupleAdjacent(ids);
+        byLevel.set(lv, reordered);
+        reordered.forEach((id, i) => slot.set(id, i));
+      }
+    } else {
+      // Bottom-up pass
+      for (let li = levels.length - 2; li >= 0; li--) {
+        const lv  = levels[li];
+        const ids = [...(byLevel.get(lv) || [])];
+        const snap = new Map(ids.map(id => [id, slot.get(id) ?? 0]));
+        ids.sort((a, b) => baryOf(a, snap) - baryOf(b, snap));
+        const reordered = coupleAdjacent(ids);
+        byLevel.set(lv, reordered);
+        reordered.forEach((id, i) => slot.set(id, i));
+      }
+    }
+  }
+
+  // ── 7. Convert slot indices → pixel X, set node positions ──
+  levels.forEach(lv => {
+    const ordered = byLevel.get(lv) || [];
+    const n = ordered.length;
+    ordered.forEach((id, i) => {
+      const node = nodes.find(nd => nd.id === id);
+      if (!node) return;
+      node.x    = (i - (n - 1) / 2) * HGAP;
+      node.y    = lv * VGAP;
+      node._gen = lv;          // store for ongoing springback force
+      node.fx   = null;        // keep nodes draggable
+      node.fy   = null;
+      node.vx   = 0;
+      node.vy   = 0;
+    });
+  });
+
+  // ── 8. Live simulation: genY springback + collision/charge ──
+  // forceY keeps each node attracted to its generation row so nodes
+  // spring back after being pushed; charge + collide prevent overlap.
+  simulation
+    .force('genY', d3.forceY(d => (d._gen ?? 0) * VGAP).strength(0.6))
+    .alpha(0.4)
+    .restart();
+
+  setTimeout(() => {
+    fitView();
+    if (btn) { btn.disabled = false; btn.innerHTML = '⇄ Rearrange'; }
+  }, 400);
+
+  toast('Chart arranged – crossings minimised ✨');
+}
+
+
 /** Fit all nodes into the visible viewport with padding. */
 function fitView() {
   if (!graphData.nodes.length) return;
@@ -891,14 +1193,13 @@ function selectNode(id) {
   // ── Pick-mode: fill the waiting field instead of opening info panel ──
   if (pickMode) {
     const { field } = pickMode;
-    document.getElementById(field).value = id;
+    ppSetById(field, id);
     const name = nodeById.get(id)?.name || 'Person';
     exitPickMode();
     toast(`${name} selected`, 'success');
-    // Auto-run trace when both endpoints are set
     if (field === 'trace-p1' || field === 'trace-p2') {
-      const p1 = document.getElementById('trace-p1').value;
-      const p2 = document.getElementById('trace-p2').value;
+      const p1 = document.getElementById('trace-p1')?.value;
+      const p2 = document.getElementById('trace-p2')?.value;
       if (p1 && p2) runTrace();
     }
     return;
@@ -1000,6 +1301,10 @@ async function deleteSelectedLink() {
   const link = graphData.links.find(l => l.id === selectedLinkId);
   if (!link) return;
 
+  const isOwner = link.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only remove relationships you created.', 'error'); return; }
+
   const p1 = nodeById.get(link.person1Id);
   const p2 = nodeById.get(link.person2Id);
   if (!confirm(`Remove the "${link.relationshipType}" relationship between ${p1?.name || '?'} and ${p2?.name || '?'}?`)) return;
@@ -1017,6 +1322,11 @@ async function deleteSelectedLink() {
     if (reverse) batch.delete(db.collection('relationships').doc(reverse.id));
 
     await batch.commit();
+    logActivity('delete_relationship', {
+      person1Id: link.person1Id, person1Name: p1?.name || link.person1Id,
+      person2Id: link.person2Id, person2Name: p2?.name || link.person2Id,
+      relationshipType: link.relationshipType
+    });
     deselectLink();
     toast('Relationship removed.', 'success');
   } catch (err) {
@@ -1073,8 +1383,10 @@ function showInfoPanel(nodeId) {
   // Admin / owner actions
   const isOwner = node.createdBy === currentUser.uid;
   const isAdmin = currentProfile.role === 'admin';
-  document.getElementById('ip-actions').style.display = (isOwner || isAdmin) ? 'flex' : 'none';
-  document.getElementById('ip-btn-delete').style.display = isAdmin ? 'inline-flex' : 'none';
+  const canEdit   = isOwner || isAdmin;
+  const canDelete = isOwner || isAdmin;
+  document.getElementById('ip-actions').style.display    = canEdit   ? 'flex'        : 'none';
+  document.getElementById('ip-btn-delete').style.display = canDelete ? 'inline-flex' : 'none';
 
   document.getElementById('info-panel').style.display = 'flex';
 }
@@ -1084,6 +1396,9 @@ function ipEdit() {
   if (!selectedNodeId) return;
   const node = nodeById.get(selectedNodeId);
   if (!node) return;
+  const isOwner = node.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only edit people you added.', 'error'); return; }
   document.getElementById('edit-id').value     = node.id;
   document.getElementById('edit-name').value   = node.name;
   document.getElementById('edit-gender').value = node.gender;
@@ -1129,6 +1444,25 @@ async function handleEditSave(e) {
   const dob    = document.getElementById('edit-dob').value || null;
 
   if (!name) return;
+
+  // Capture old values for the log before writing
+  const _nodeSnap = nodeById.get(id);
+  const _oldName   = _nodeSnap?.name        || '';
+  const _oldGender = _nodeSnap?.gender      || '';
+  const _oldDob    = _nodeSnap?.dateOfBirth || '';
+
+  // Permission guard — re-check on the client before writing
+  const node = nodeById.get(id);
+  if (node) {
+    const isOwner = node.createdBy === currentUser.uid;
+    const isAdmin = currentProfile.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      toast('You can only edit people you added.', 'error');
+      closeModal('modal-edit');
+      return;
+    }
+  }
+
   try {
     await db.collection('nodes').doc(id).update({
       name, gender,
@@ -1138,15 +1472,26 @@ async function handleEditSave(e) {
     });
     closeModal('modal-edit');
     toast('Changes saved!', 'success');
+    logActivity('edit_person', {
+      personId: id, personName: name,
+      oldName: _oldName, newName: name,
+      oldGender: _oldGender, newGender: gender,
+      oldDob: _oldDob, newDob: dob || ''
+    });
   } catch (err) {
     toast('Error: ' + err.message, 'error');
   }
 }
 
 async function deleteSelectedNode() {
-  if (!selectedNodeId || currentProfile.role !== 'admin') return;
+  if (!selectedNodeId) return;
   const node = nodeById.get(selectedNodeId);
   if (!node) return;
+
+  const isOwner = node.createdBy === currentUser.uid;
+  const isAdmin = currentProfile.role === 'admin';
+  if (!isOwner && !isAdmin) { toast('You can only delete people you added.', 'error'); return; }
+
   if (!confirm(`Permanently delete "${node.name}" and all their relationships?`)) return;
 
   try {
@@ -1159,11 +1504,107 @@ async function deleteSelectedNode() {
       .forEach(l => batch.delete(db.collection('relationships').doc(l.id)));
 
     await batch.commit();
+    logActivity('delete_person', { personId: selectedNodeId, personName: node.name, gender: node.gender });
     closeModal('modal-node');
     deselectNode();
     toast(`"${node.name}" deleted.`);
   } catch (err) {
     toast('Error: ' + err.message, 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   10c. ACTIVITY LOG
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Fire-and-forget helper — writes one entry to the activityLogs collection.
+ * Never blocks or throws; failures are silently warned in the console.
+ *
+ * @param {string} action   – e.g. 'add_person', 'edit_person', 'delete_person',
+ *                            'add_relationship', 'delete_relationship', 'accept_suggestion'
+ * @param {object} details  – arbitrary metadata about the action
+ */
+function logActivity(action, details = {}) {
+  db.collection('activityLogs').add({
+    action,
+    userId:    currentUser.uid,
+    userName:  currentProfile.displayName || currentProfile.name || currentUser.email,
+    userEmail: currentUser.email,
+    role:      currentProfile.role,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    details
+  }).catch(err => console.warn('Activity log write failed:', err));
+}
+
+/** Open the Activity Log modal (admin only). */
+async function openActivityLog() {
+  if (currentProfile.role !== 'admin') return;
+  document.getElementById('modal-activity-log').style.display = 'flex';
+  const body = document.getElementById('activity-log-body');
+  body.innerHTML = '<div class="al-loading">⏳ Loading activity…</div>';
+
+  try {
+    const snap = await db.collection('activityLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(300)
+      .get();
+
+    if (snap.empty) {
+      body.innerHTML = '<div class="al-empty"><span>📭</span><p>No activity recorded yet.</p></div>';
+      return;
+    }
+
+    const ACTION_META = {
+      add_person:          { icon: '➕', label: 'Added person',          color: '#22c55e' },
+      edit_person:         { icon: '✏️', label: 'Edited person',          color: '#3b82f6' },
+      delete_person:       { icon: '🗑', label: 'Deleted person',         color: '#ef4444' },
+      add_relationship:    { icon: '🔗', label: 'Added relationship',     color: '#8b5cf6' },
+      delete_relationship: { icon: '✂️', label: 'Removed relationship',   color: '#f59e0b' },
+      accept_suggestion:   { icon: '💡', label: 'Accepted suggestion',    color: '#0d9488' },
+    };
+
+    body.innerHTML = snap.docs.map(doc => {
+      const d  = doc.data();
+      const ts = d.timestamp?.toDate ? d.timestamp.toDate() : null;
+      const timeStr = ts
+        ? ts.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+        : '—';
+
+      const meta  = ACTION_META[d.action] || { icon: '•', label: d.action, color: '#64748b' };
+      const isAdm = d.role === 'admin';
+
+      // Build detail line
+      const det = d.details || {};
+      let detailParts = [];
+      if (det.personName)     detailParts.push(`<strong>${escapeHtml(det.personName)}</strong>`);
+      if (det.oldName && det.newName && det.oldName !== det.newName)
+        detailParts.push(`<span class="al-change">${escapeHtml(det.oldName)} → ${escapeHtml(det.newName)}</span>`);
+      if (det.person1Name)    detailParts.push(`<strong>${escapeHtml(det.person1Name)}</strong>`);
+      if (det.relationshipType)
+        detailParts.push(`<span class="al-rel-badge">${escapeHtml(det.relationshipType)}</span>`);
+      if (det.person2Name)    detailParts.push(`<strong>${escapeHtml(det.person2Name)}</strong>`);
+      if (det.oldGender && det.newGender && det.oldGender !== det.newGender)
+        detailParts.push(`<span class="al-change">${escapeHtml(det.oldGender)} → ${escapeHtml(det.newGender)}</span>`);
+
+      return `
+        <div class="al-entry">
+          <span class="al-icon" style="background:${meta.color}22;color:${meta.color}">${meta.icon}</span>
+          <div class="al-entry-body">
+            <div class="al-entry-top">
+              <span class="al-action-label" style="color:${meta.color}">${meta.label}</span>
+              ${detailParts.length ? '<span class="al-dot">·</span>' + detailParts.join(' ') : ''}
+            </div>
+            <div class="al-entry-bottom">
+              <span class="al-user-name">${escapeHtml(det.userName || d.userName || d.userEmail)}</span>
+              <span class="al-role-badge ${isAdm ? 'al-role-admin' : 'al-role-user'}">${d.role}</span>
+              <span class="al-time">${timeStr}</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--danger);padding:20px;text-align:center">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1316,18 +1757,320 @@ function renderPeopleList(nodes) {
   wrapper.innerHTML = `<div class="people-list-inner">${html}</div>`;
 }
 
-function refreshPersonSelects() {
-  const sorted = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
-  const opts   = sorted.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('');
+/* ════════════════════════════════════════════════════════════
+   PERSON PICKER  –  searchable autocomplete replacing <select>
+════════════════════════════════════════════════════════════ */
 
-  ['rel-p1', 'rel-p2', 'trace-p1', 'trace-p2'].forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = `<option value="">Select person *</option>` + opts;
-    sel.value = cur;
+/** Show (or refresh) the dropdown for the picker that owns inputEl. */
+function ppOpen(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (wrap) _ppShowDrop(wrap, inputEl.value);
+}
+
+/** Filter dropdown as the user types; clear stale selection if text changed. */
+function ppFilter(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (!wrap) return;
+  const hid = wrap.querySelector('input[type=hidden]');
+  if (hid?.value) {
+    const cur = graphData.nodes.find(n => n.id === hid.value);
+    if (cur && inputEl.value !== cur.name) hid.value = '';
+  }
+  _ppShowDrop(wrap, inputEl.value);
+}
+
+/** Close dropdown on blur; if nothing selected clear the text. */
+function ppBlur(inputEl) {
+  const wrap = inputEl.closest('.person-picker');
+  if (!wrap) return;
+  setTimeout(() => {
+    const drop = wrap.querySelector('.pp-dropdown');
+    if (drop) drop.style.display = 'none';
+    const hid = wrap.querySelector('input[type=hidden]');
+    if (hid && !hid.value) inputEl.value = '';
+  }, 160);
+}
+
+/** Called via onmousedown on a .pp-option — sets the hidden value and closes. */
+function ppSelect(hidEl, personId) {
+  const node = graphData.nodes.find(n => n.id === personId);
+  if (!node || !hidEl) return;
+  hidEl.value = personId;
+  const wrap = hidEl.closest('.person-picker');
+  if (wrap) {
+    const inp = wrap.querySelector('.pp-input');
+    if (inp) inp.value = node.name;
+    const drop = wrap.querySelector('.pp-dropdown');
+    if (drop) drop.style.display = 'none';
+  }
+  // Auto-run trace when both trace fields are filled
+  if (hidEl.id === 'trace-p1' || hidEl.id === 'trace-p2') {
+    const p1 = document.getElementById('trace-p1')?.value;
+    const p2 = document.getElementById('trace-p2')?.value;
+    if (p1 && p2) runTrace();
+  }
+}
+
+/** Set a picker by the hidden input's id — used from pick-mode and external code. */
+function ppSetById(hiddenId, personId) {
+  const hEl = document.getElementById(hiddenId);
+  if (!hEl) return;
+  const node = graphData.nodes.find(n => n.id === personId);
+  if (!node) return;
+  hEl.value = personId;
+  const wrap = hEl.closest('.person-picker');
+  if (!wrap) return;
+  const inp = wrap.querySelector('.pp-input');
+  if (inp) inp.value = node.name;
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (drop) drop.style.display = 'none';
+}
+
+/** Clear a picker by the hidden input's id. */
+function ppClearById(hiddenId) {
+  const hEl = document.getElementById(hiddenId);
+  if (!hEl) return;
+  hEl.value = '';
+  const wrap = hEl.closest('.person-picker');
+  if (!wrap) return;
+  const inp = wrap.querySelector('.pp-input');
+  if (inp) inp.value = '';
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (drop) drop.style.display = 'none';
+}
+
+/** Build and show the dropdown list filtered by query. */
+function _ppShowDrop(wrap, query) {
+  const hid  = wrap.querySelector('input[type=hidden]');
+  const drop = wrap.querySelector('.pp-dropdown');
+  if (!drop) return;
+
+  let nodes = [...graphData.nodes];
+  // In quick-link modal, exclude the newly added person
+  if (hid?.id === 'ql-other-person' && _quickLinkPersonId) {
+    nodes = nodes.filter(n => n.id !== _quickLinkPersonId);
+  }
+  nodes.sort((a, b) => a.name.localeCompare(b.name));
+
+  const q       = (query || '').toLowerCase().trim();
+  const matches = q ? nodes.filter(n => n.name.toLowerCase().includes(q)) : nodes;
+
+  if (!matches.length) {
+    drop.innerHTML = '<div class="pp-empty">No matches</div>';
+    drop.style.display = 'block';
+    return;
+  }
+
+  const curVal  = hid?.value || '';
+  const hidId   = hid?.id    || '';
+  drop.innerHTML = matches.map(n => {
+    const sel = n.id === curVal ? ' selected' : '';
+    // Use a safe data attribute approach; hidId cannot contain quotes in practice
+    return `<div class="pp-option${sel}" onmousedown="ppSelect(document.getElementById('${hidId}'),'${n.id}')">${escapeHtml(n.name)}</div>`;
+  }).join('');
+  drop.style.display = 'block';
+}
+
+/* ════════════════════════════════════════════════════════════
+   CHART SEARCH  –  highlight & pan to matching nodes
+════════════════════════════════════════════════════════════ */
+
+function searchChart(query) {
+  const q       = (query || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('chart-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'inline-flex' : 'none';
+
+  if (!q) {
+    nodesLayer?.selectAll('.node-g').classed('search-match search-fade', false);
+    return;
+  }
+
+  const matches  = graphData.nodes.filter(n => n.name.toLowerCase().includes(q));
+  const matchIds = new Set(matches.map(n => n.id));
+
+  nodesLayer.selectAll('.node-g')
+    .classed('search-match', d => matchIds.has(d.id))
+    .classed('search-fade',  d => !matchIds.has(d.id));
+
+  // Pan to first match
+  if (matches.length) {
+    const first = matches[0];
+    const svgEl = document.getElementById('chart-svg');
+    const w = svgEl.clientWidth, h = svgEl.clientHeight;
+    const t = d3.zoomTransform(svgEl);
+    const tx = w / 2 - (first.x || 0) * t.k;
+    const ty = h / 2 - (first.y || 0) * t.k;
+    d3.select(svgEl).transition().duration(400)
+      .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(t.k));
+  }
+}
+
+function clearChartSearch() {
+  const inp = document.getElementById('chart-search');
+  if (inp) { inp.value = ''; searchChart(''); }
+}
+
+function refreshPersonSelects() {
+  // Pickers read from graphData.nodes dynamically – just evict stale selections
+  ['rel-p1', 'rel-p2', 'trace-p1', 'trace-p2'].forEach(hidId => {
+    const hEl = document.getElementById(hidId);
+    if (hEl?.value && !graphData.nodes.find(n => n.id === hEl.value)) {
+      ppClearById(hidId);
+    }
   });
 }
+
+/* ════════════════════════════════════════════════════════════
+   EXPORT  –  CSV / JSON / GEDCOM download
+════════════════════════════════════════════════════════════ */
+
+const REL_LABEL = {
+  'parent':        'is Parent of',
+  'child':         'is Child of',
+  'sibling':       'is Sibling of',
+  'spouse':        'is Spouse of',
+  'parent-in-law': 'is Parent-in-law of',
+  'child-in-law':  'is Child-in-law of',
+  'sibling-in-law':'is Sibling-in-law of',
+};
+
+function openExportModal() {
+  const pCount = graphData.nodes.length;
+  const rCount = graphData.links.filter(l => !l.isReverse).length;
+  document.getElementById('export-stats').innerHTML =
+    `<span class="export-stat"><strong>${pCount}</strong> people</span>` +
+    `<span class="export-stat-sep">·</span>` +
+    `<span class="export-stat"><strong>${rCount}</strong> relationships</span>`;
+  document.getElementById('modal-export').style.display = 'flex';
+}
+
+function _downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV() {
+  const people = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
+  const rels   = graphData.links.filter(l => !l.isReverse);
+  const esc    = v => `"${(v || '').replace(/"/g, '""')}"`;
+
+  let csv = 'PEOPLE\r\nName,Gender,Date of Birth\r\n';
+  people.forEach(p => {
+    csv += `${esc(p.name)},${esc(p.gender)},${esc(p.dateOfBirth || '')}\r\n`;
+  });
+
+  csv += '\r\nRELATIONSHIPS\r\nPerson 1,Relationship,Person 2\r\n';
+  rels.forEach(l => {
+    const p1  = nodeById.get(l.person1Id)?.name || l.person1Id;
+    const p2  = nodeById.get(l.person2Id)?.name || l.person2Id;
+    const rel = REL_LABEL[l.relationshipType] || l.relationshipType;
+    csv += `${esc(p1)},${esc(rel)},${esc(p2)}\r\n`;
+  });
+
+  _downloadFile(csv, 'pedigree-export.csv', 'text/csv;charset=utf-8;');
+  closeModal('modal-export');
+  toast('CSV downloaded ✓', 'success');
+}
+
+function exportJSON() {
+  const people = [...graphData.nodes]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(p => ({ name: p.name, gender: p.gender || null, dateOfBirth: p.dateOfBirth || null }));
+
+  const relationships = graphData.links.filter(l => !l.isReverse).map(l => ({
+    person1:      nodeById.get(l.person1Id)?.name || l.person1Id,
+    relationship: l.relationshipType,
+    person2:      nodeById.get(l.person2Id)?.name || l.person2Id,
+  }));
+
+  _downloadFile(
+    JSON.stringify({ exportedAt: new Date().toISOString(), totalPeople: people.length, totalRelationships: relationships.length, people, relationships }, null, 2),
+    'pedigree-export.json', 'application/json'
+  );
+  closeModal('modal-export');
+  toast('JSON downloaded ✓', 'success');
+}
+
+function exportGEDCOM() {
+  const nodes  = graphData.nodes;
+  const links  = graphData.links.filter(l => !l.isReverse);
+  const iTag   = new Map(nodes.map((n, i) => [n.id, `@I${i + 1}@`]));
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+  // Build FAM records from spouse links + their shared children
+  const famSeen = new Set();
+  const families = [];
+  let fi = 1;
+
+  links.filter(l => l.relationshipType === 'spouse').forEach(l => {
+    const key = [l.person1Id, l.person2Id].sort().join(':');
+    if (famSeen.has(key)) return;
+    famSeen.add(key);
+    const childIds = [...new Set(
+      links.filter(l2 => l2.relationshipType === 'parent' &&
+        (l2.person1Id === l.person1Id || l2.person1Id === l.person2Id))
+      .map(l2 => l2.person2Id)
+    )];
+    families.push({ famTag: `@F${fi++}@`, p1: l.person1Id, p2: l.person2Id, childIds });
+  });
+
+  // Single-parent families
+  links.filter(l => l.relationshipType === 'parent').forEach(l => {
+    const already = families.some(f =>
+      (f.p1 === l.person1Id || f.p2 === l.person1Id) && f.childIds.includes(l.person2Id));
+    if (already) return;
+    let fam = families.find(f => (f.p1 === l.person1Id || f.p2 === l.person1Id) && !f.p2);
+    if (!fam) { fam = { famTag: `@F${fi++}@`, p1: l.person1Id, p2: null, childIds: [] }; families.push(fam); }
+    if (!fam.childIds.includes(l.person2Id)) fam.childIds.push(l.person2Id);
+  });
+
+  const childFamOf  = new Map();
+  const spouseFamsOf = new Map(nodes.map(n => [n.id, []]));
+  families.forEach(f => {
+    f.childIds.forEach(cid => childFamOf.set(cid, f.famTag));
+    if (f.p1) spouseFamsOf.get(f.p1)?.push(f.famTag);
+    if (f.p2) spouseFamsOf.get(f.p2)?.push(f.famTag);
+  });
+
+  let ged = '0 HEAD\r\n1 GEDC\r\n2 VERS 5.5.1\r\n2 FORM LINEAGE-LINKED\r\n1 CHAR UTF-8\r\n1 SOUR Global-Pedigree-Chart\r\n2 NAME Global Pedigree Chart\r\n';
+
+  nodes.forEach(n => {
+    const tag   = iTag.get(n.id);
+    const parts = n.name.trim().split(' ');
+    const surn  = parts.length > 1 ? parts[parts.length - 1] : '';
+    const givn  = parts.slice(0, surn ? -1 : undefined).join(' ') || n.name;
+    const sex   = n.gender === 'male' ? 'M' : n.gender === 'female' ? 'F' : 'U';
+    ged += `0 ${tag} INDI\r\n1 NAME ${givn}${surn ? ' /' + surn + '/' : ''}\r\n`;
+    if (surn) ged += `2 SURN ${surn}\r\n`;
+    if (givn) ged += `2 GIVN ${givn}\r\n`;
+    ged += `1 SEX ${sex}\r\n`;
+    if (n.dateOfBirth) {
+      const [y, mo, d] = n.dateOfBirth.split('-');
+      const gd = [d && d.padStart(2,'0'), mo && months[+mo-1], y].filter(Boolean).join(' ');
+      ged += `1 BIRT\r\n2 DATE ${gd}\r\n`;
+    }
+    if (childFamOf.has(n.id))  ged += `1 FAMC ${childFamOf.get(n.id)}\r\n`;
+    (spouseFamsOf.get(n.id)||[]).forEach(ft => { ged += `1 FAMS ${ft}\r\n`; });
+  });
+
+  families.forEach(f => {
+    ged += `0 ${f.famTag} FAM\r\n`;
+    const p1node = nodes.find(n => n.id === f.p1);
+    const p2node = f.p2 ? nodes.find(n => n.id === f.p2) : null;
+    if (f.p1) ged += `1 ${p1node?.gender === 'female' ? 'WIFE' : 'HUSB'} ${iTag.get(f.p1)}\r\n`;
+    if (f.p2) ged += `1 ${p2node?.gender === 'female' ? 'WIFE' : 'HUSB'} ${iTag.get(f.p2)}\r\n`;
+    f.childIds.forEach(cid => { ged += `1 CHIL ${iTag.get(cid)}\r\n`; });
+  });
+
+  ged += '0 TRLR\r\n';
+  _downloadFile(ged, 'pedigree-export.ged', 'text/plain;charset=utf-8;');
+  closeModal('modal-export');
+  toast('GEDCOM downloaded ✓', 'success');
+}
+
 
 /* ════════════════════════════════════════════════════════════
    TRACE RELATIONSHIP  –  BFS shortest path between two members
@@ -1407,8 +2150,8 @@ function clearTrace() {
   nodesLayer.selectAll('.node-g').classed('in-path start-node end-node path-faded', false);
   linksLayer.selectAll('.link-g').classed('path-active path-faded', false);
   document.getElementById('trace-result').innerHTML = '';
-  document.getElementById('trace-p1').value = '';
-  document.getElementById('trace-p2').value = '';
+  ppClearById('trace-p1');
+  ppClearById('trace-p2');
 }
 
 /** Applies CSS classes to nodes/links to visualise the path. */
@@ -1826,6 +2569,11 @@ async function acceptSuggestion(sugId) {
 
   try {
     await batch.commit();
+    logActivity('accept_suggestion', {
+      person1Id, person1Name: nodeById.get(person1Id)?.name || person1Id,
+      person2Id, person2Name: nodeById.get(person2Id)?.name || person2Id,
+      relationshipType, reason: sug.reason || ''
+    });
     currentSuggestions = currentSuggestions.filter(s => s.id !== sugId);
     renderSuggestionsModal();
     toast('Relationship added!', 'success');
@@ -1841,14 +2589,24 @@ document.addEventListener('keydown', (e) => {
 
 /** Toggle the left panel open / closed. */
 function togglePanel() {
-  const panel  = document.getElementById('left-panel');
-  const btn    = document.getElementById('hamburger-btn');
-  const body   = document.querySelector('.app-body');
-  const collapsed = panel.classList.toggle('collapsed');
-  btn.classList.toggle('open', collapsed);
-  body.classList.toggle('panel-collapsed', collapsed);
-  // Re-fit the chart so it fills the new width after the transition
-  setTimeout(fitView, 300);
+  const panel   = document.getElementById('left-panel');
+  const btn     = document.getElementById('hamburger-btn');
+  const body    = document.querySelector('.app-body');
+  const overlay = document.getElementById('panel-overlay');
+  const mobile  = window.innerWidth <= 768;
+
+  if (mobile) {
+    // Mobile: slide drawer in/out with mobile-open class
+    const open = panel.classList.toggle('mobile-open');
+    if (overlay) overlay.classList.toggle('visible', open);
+  } else {
+    // Desktop: push-collapse
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.classList.toggle('open', collapsed);
+    body.classList.toggle('panel-collapsed', collapsed);
+    if (overlay) overlay.classList.remove('visible');
+    setTimeout(fitView, 300);
+  }
 }
 
 /** Simple XSS-safe string. */

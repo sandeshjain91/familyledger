@@ -107,7 +107,12 @@
         <h3 class="section-title">Add Relationship</h3>
         <form id="form-add-rel">
           <div class="pick-row">
-            <select id="rel-p1" required><option value="">Person 1 *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person 1 – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="rel-p1" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetRelP1()" title="Click a person on the chart">⊕</button>
           </div>
           <select id="rel-type" required>
@@ -118,7 +123,12 @@
             <option value="spouse">is Spouse of ↔</option>
           </select>
           <div class="pick-row">
-            <select id="rel-p2" required><option value="">Person 2 *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person 2 – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="rel-p2" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetRelP2()" title="Click a person on the chart">⊕</button>
           </div>
           <button type="submit" class="btn-primary full">+ Link People</button>
@@ -130,11 +140,21 @@
         <h3 class="section-title">Trace Connection</h3>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div class="pick-row">
-            <select id="trace-p1"><option value="">Person A *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person A – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="trace-p1" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetTraceP1()" title="Click a person on the chart">⊕</button>
           </div>
           <div class="pick-row">
-            <select id="trace-p2"><option value="">Person B *</option></select>
+            <div class="person-picker">
+              <input type="text" class="pp-input" placeholder="Person B – search…" autocomplete="off"
+                     oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+              <input type="hidden" id="trace-p2" />
+              <div class="pp-dropdown"></div>
+            </div>
             <button type="button" class="pick-chart-btn" onclick="ipSetTraceP2()" title="Click a person on the chart">⊕</button>
           </div>
           <div style="display:flex;gap:6px">
@@ -150,6 +170,7 @@
         <h3 class="section-title">Admin Controls</h3>
         <button class="btn-secondary full" onclick="openUserMgmt()">👥 Manage Users</button>
         <button class="btn-secondary full" style="margin-top:6px" onclick="openConflicts()">⚠️ View Conflicts</button>
+        <button class="btn-secondary full" style="margin-top:6px" onclick="openActivityLog()">📋 Activity Log</button>
       </section>
 
       <!-- People Directory -->
@@ -157,6 +178,7 @@
         <h3 class="section-title">
           People
           <span class="count-badge" id="people-count">0</span>
+          <button class="export-icon-btn" onclick="openExportModal()" title="Export people & relationships">⬇ Export</button>
         </h3>
         <input type="text" id="search-input" placeholder="Search by name…" oninput="filterPeople()" />
         <div id="people-list"></div>
@@ -177,17 +199,38 @@
         <button title="Reset zoom" onclick="resetZoom()" style="font-size:12px">1:1</button>
       </div>
 
-      <!-- Suggest Connections button -->
-      <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
-        💡 Suggest Connections
-      </button>
+      <!-- Chart action buttons -->
+      <div class="chart-action-bar">
+        <div class="chart-search-wrap">
+          <span class="chart-search-icon">🔍</span>
+          <input type="text" id="chart-search" class="chart-search-input"
+                 placeholder="Search chart…" oninput="searchChart(this.value)" autocomplete="off" />
+          <button class="chart-search-clear" id="chart-search-clear"
+                  onclick="clearChartSearch()" style="display:none" title="Clear search">✕</button>
+        </div>
+        <button class="suggest-btn" onclick="openSuggestionsModal()" title="Analyse the tree and suggest missing connections">
+          💡 Suggest Connections
+        </button>
+        <button class="rearrange-btn" id="rearrange-btn" onclick="rearrangeChart()" title="Automatically rearrange the chart for the clearest layout">
+          ⇄ Rearrange
+        </button>
+      </div>
 
-      <!-- Legend -->
+      <!-- Legend / Visibility Toggles -->
       <div class="legend">
-        <span class="legend-item"><span class="leg-line parent"></span>Parent / Child</span>
-        <span class="legend-item"><span class="leg-line sibling"></span>Sibling</span>
-        <span class="legend-item"><span class="leg-line spouse"></span>Spouse</span>
-        <span class="legend-item"><span class="leg-line in-law"></span>In-Law</span>
+        <span class="legend-label">Show lines:</span>
+        <button class="leg-toggle" data-type="parent"  onclick="toggleLinkType('parent')"  title="Toggle Parent / Child lines">
+          <span class="leg-line parent"></span><span class="leg-toggle-label">Parent / Child</span>
+        </button>
+        <button class="leg-toggle" data-type="sibling" onclick="toggleLinkType('sibling')" title="Toggle Sibling lines">
+          <span class="leg-line sibling"></span><span class="leg-toggle-label">Sibling</span>
+        </button>
+        <button class="leg-toggle" data-type="spouse"  onclick="toggleLinkType('spouse')"  title="Toggle Spouse lines">
+          <span class="leg-line spouse"></span><span class="leg-toggle-label">Spouse</span>
+        </button>
+        <button class="leg-toggle" data-type="in-law"  onclick="toggleLinkType('in-law')"  title="Toggle In-Law lines">
+          <span class="leg-line in-law"></span><span class="leg-toggle-label">In-Law</span>
+        </button>
       </div>
 
       <!-- Pick-mode banner (shown when waiting for user to click a person) -->
@@ -342,6 +385,46 @@
   </div>
 </div>
 
+<!-- Quick-Link Modal (auto-shown after adding a person) -->
+<div id="modal-quick-link" class="modal-backdrop" style="display:none" onclick="closeQuickLinkModal()">
+  <div class="modal-box ql-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>🔗 Link to Family</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">
+          Connect <span id="ql-new-person-label"></span> to an existing person
+        </p>
+      </div>
+      <button class="close-btn" onclick="closeQuickLinkModal()">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <div>
+        <label>New person is…</label>
+        <select id="ql-rel-type">
+          <option value="">Relationship type *</option>
+          <option value="parent">Parent of →</option>
+          <option value="child">Child of →</option>
+          <option value="sibling">Sibling of ↔</option>
+          <option value="spouse">Spouse of ↔</option>
+        </select>
+      </div>
+      <div>
+        <label>Other person</label>
+        <div class="person-picker">
+        <input type="text" class="pp-input" placeholder="Type to search a person…" autocomplete="off"
+               oninput="ppFilter(this)" onfocus="ppOpen(this)" onblur="ppBlur(this)" />
+        <input type="hidden" id="ql-other-person" />
+        <div class="pp-dropdown"></div>
+      </div>
+      </div>
+    </div>
+    <div class="modal-actions" style="border-top:none;padding-top:0;margin-top:14px">
+      <button id="ql-link-btn" class="btn-primary" onclick="handleQuickLink()">+ Link</button>
+      <button class="btn-ghost" onclick="closeQuickLinkModal()">Skip</button>
+    </div>
+  </div>
+</div>
+
 <!-- Conflicts Modal -->
 <div id="modal-conflicts" class="modal-backdrop" style="display:none" onclick="closeModal('modal-conflicts')">
   <div class="modal-box" onclick="event.stopPropagation()">
@@ -350,6 +433,61 @@
       <button class="close-btn" onclick="closeModal('modal-conflicts')">✕</button>
     </div>
     <div id="conflicts-body" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- Activity Log Modal (admin only) -->
+<div id="modal-activity-log" class="modal-backdrop" style="display:none" onclick="closeModal('modal-activity-log')">
+  <div class="modal-box wide al-modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>📋 Activity Log</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">All additions and changes by every user</p>
+      </div>
+      <button class="close-btn" onclick="closeModal('modal-activity-log')">✕</button>
+    </div>
+    <div id="activity-log-body" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<!-- Export Modal -->
+<div id="modal-export" class="modal-backdrop" style="display:none" onclick="closeModal('modal-export')">
+  <div class="modal-box export-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>⬇ Export Data</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:4px">
+          Download all people and their relationships
+        </p>
+      </div>
+      <button class="close-btn" onclick="closeModal('modal-export')">✕</button>
+    </div>
+
+    <div class="export-stats" id="export-stats"></div>
+
+    <div class="export-options">
+      <button class="export-opt-btn" onclick="exportCSV()">
+        <span class="export-opt-icon">📄</span>
+        <div>
+          <div class="export-opt-title">CSV Spreadsheet</div>
+          <div class="export-opt-desc">Opens in Excel, Google Sheets, Numbers</div>
+        </div>
+      </button>
+      <button class="export-opt-btn" onclick="exportJSON()">
+        <span class="export-opt-icon">{ }</span>
+        <div>
+          <div class="export-opt-title">JSON</div>
+          <div class="export-opt-desc">Structured data — import into any app</div>
+        </div>
+      </button>
+      <button class="export-opt-btn" onclick="exportGEDCOM()">
+        <span class="export-opt-icon">🌳</span>
+        <div>
+          <div class="export-opt-title">GEDCOM</div>
+          <div class="export-opt-desc">Standard genealogy format — import into Ancestry, MyHeritage, Gramps…</div>
+        </div>
+      </button>
+    </div>
   </div>
 </div>
 
