@@ -223,15 +223,12 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 .hamburger-btn span {
   display: block;
   height: 2px;
-  background: currentColor;
+  background: #fff;
   border-radius: 2px;
   transition: transform .25s ease, opacity .2s ease, width .25s ease;
   transform-origin: center;
 }
-/* Animate to X when open */
-.hamburger-btn.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
-.hamburger-btn.open span:nth-child(2) { opacity: 0; width: 0; }
-.hamburger-btn.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+/* No X animation – icon always stays as three bars */
 
 #hdr-name { font-size: 13px; color: #cbd5e1; }
 
@@ -1321,11 +1318,14 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
    RESPONSIVE  –  Mobile (≤768 px)
 ════════════════════════════════════════════════════════════ */
 
-/* ── Panel overlay backdrop (mobile drawer) ── */
+/* ── Panel overlay backdrop (mobile drawer, sits below header) ── */
 .panel-overlay {
   display: none;
   position: fixed;
-  inset: 0;
+  top: 52px;   /* below the 52px header */
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: rgba(0,0,0,.45);
   z-index: 199;
   touch-action: none;
@@ -1337,12 +1337,18 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   /* ── Hamburger bars: always white ── */
   .hamburger-btn span { background: #fff !important; }
 
-  /* ── Left panel becomes a fixed drawer ── */
+  /* ── Hamburger stays in header flow (no fixed repositioning) ── */
+  .hamburger-btn {
+    position: static !important;
+    background: transparent !important;
+  }
+
+  /* ── Left panel becomes a fixed drawer (below 52px header) ── */
   .left-panel {
     position: fixed;
-    top: 0;
+    top: 52px;
     left: 0;
-    height: 100%;
+    height: calc(100% - 52px);
     width: 82vw;
     max-width: 320px;
     z-index: 200;
@@ -1357,15 +1363,6 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   /* Desktop collapsed class must not block mobile open */
   .left-panel.collapsed { transform: translateX(-100%); }
   .left-panel.collapsed.mobile-open { transform: translateX(0); }
-
-  /* ── Hamburger button: always visible, positioned top-left ── */
-  .hamburger-btn {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 201;
-    background: transparent !important;
-  }
 
   /* ── Chart area: full width ── */
   body.panel-collapsed .chart-area,
@@ -1399,7 +1396,6 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
     flex-wrap: wrap;
     gap: 6px;
     padding: 6px 8px;
-    padding-left: 52px; /* clear the hamburger */
   }
   .chart-action-bar button { font-size: 12px; padding: 6px 10px; }
   .chart-search-wrap { width: 100%; }
@@ -1446,8 +1442,7 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   .pp-dropdown { max-height: 180px; }
 
   /* ── Safe area padding for notch phones ── */
-  .left-panel { padding-top: env(safe-area-inset-top, 0px); }
-  .chart-action-bar { padding-top: max(8px, env(safe-area-inset-top, 8px)); }
+  .chart-action-bar { padding-top: max(6px, env(safe-area-inset-top, 6px)); }
 }
 
 /* ═══════════════════════════════════════════════════════════
