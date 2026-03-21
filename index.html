@@ -74,15 +74,8 @@
       <span class="header-logo">🌳</span>
       <span class="header-title">Global Pedigree Chart</span>
     </div>
-    <!-- Mobile-only: search + action buttons live here inside the header -->
+    <!-- Mobile-only: compact action buttons inside the header -->
     <div class="header-center">
-      <div class="chart-search-wrap">
-        <span class="chart-search-icon">🔍</span>
-        <input type="text" id="chart-search-hdr" class="chart-search-input"
-               placeholder="Search…" oninput="searchChart(this.value)" autocomplete="off" />
-        <button class="chart-search-clear" id="chart-search-clear-hdr"
-                onclick="clearChartSearch()" style="display:none" title="Clear">✕</button>
-      </div>
       <button class="hdr-icon-btn" onclick="openSuggestionsModal()" title="Suggest Connections">💡</button>
       <button class="hdr-icon-btn" onclick="rearrangeChart()" title="Rearrange">⇄</button>
     </div>

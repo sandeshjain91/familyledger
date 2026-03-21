@@ -1359,36 +1359,17 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
     background: transparent !important;
   }
 
-  /* ── Header: action bar inside, hide title/logo ── */
-  #app-header { padding: 0 8px; gap: 6px; }
+  /* ── Header: compact, title/logo hidden, icon buttons visible ── */
+  #app-header { padding: 0 8px; gap: 0; justify-content: space-between; }
   .header-title { display: none; }
   .header-logo  { display: none; }
   #hdr-name     { display: none; }
   .btn-ghost.sm { font-size: 11px; padding: 4px 8px; }
 
-  /* ── Show header-center (search + icon buttons) ── */
-  .header-center {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
-  }
-  .header-center .chart-search-wrap { flex: 1; min-width: 0; }
-  .header-center .chart-search-input {
-    width: 100%;
-    font-size: 14px;
-    padding: 5px 8px;
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.22);
-    color: #fff;
-    border-radius: 8px;
-  }
-  .header-center .chart-search-input::placeholder { color: rgba(255,255,255,0.5); }
-  .header-center .chart-search-icon { color: rgba(255,255,255,0.6); font-size: 13px; }
-  .header-center .chart-search-clear { color: rgba(255,255,255,0.7); background: none; border: none; padding: 0 4px; }
+  /* ── Show header-center: just the two icon buttons ── */
+  .header-center { display: flex; align-items: center; gap: 6px; }
 
-  /* ── Hide the desktop chart-action-bar strip on mobile ── */
+  /* ── Hide the desktop chart-action-bar on mobile ── */
   .chart-action-bar { display: none !important; }
   .chart-area { padding-top: 0; }
 
