@@ -225,6 +225,28 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 }
 .hdr-icon-btn:active { background: rgba(255,255,255,0.25); }
 
+/* ─── Mobile focus-mode back button ─── */
+.mobile-focus-back {
+  display: none;
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  background: #1a1b2e;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 20px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* ─── Mobile header search bar ─── */
 .hdr-search-bar {
   display: none; /* shown via JS on mobile */

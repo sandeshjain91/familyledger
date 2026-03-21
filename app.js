@@ -36,6 +36,7 @@ let pickMode            = null; // { field: 'rel-p1'|'rel-p2'|'trace-p1'|'trace-
 let _nodeTapped         = false; // guard against mobile ghost-click on SVG background
 let _nodeTapTimer       = null;  // timer handle for clearing _nodeTapped
 let _infoPanelShownAt   = 0;     // timestamp (ms) when info panel was last shown
+let _mobileFocusActive  = false; // true when mobile focus-mode is zoomed in on a node
 
 // Graph data (kept in sync via onSnapshot)
 const graphData = {
@@ -575,6 +576,14 @@ function initGraph() {
 
   // Prevent double-click zoom (we use double-click for nodes)
   svgSel.on('dblclick.zoom', null);
+
+  // Mobile: double-tap empty canvas exits focus mode
+  svgSel.on('dblclick', (event) => {
+    if (window.innerWidth <= 768 && _mobileFocusActive) {
+      if (event.target && event.target.closest && event.target.closest('.node-g')) return;
+      deselectNode();
+    }
+  });
 
   // Deselect node/link on background click; also cancel pick mode.
   // On mobile we never auto-close on SVG tap — ghost clicks from D3 drag make it
@@ -1240,6 +1249,33 @@ function selectNode(id) {
     .classed('link-active', d => d.person1Id === id || d.person2Id === id)
     .classed('link-faded',  d => d.person1Id !== id && d.person2Id !== id && hasConnections);
 
+  // ── Mobile focus mode: zoom in on selected node + neighbours ──
+  if (window.innerWidth <= 768) {
+    _mobileFocusActive = true;
+    const node = nodeById.get(id);
+    if (node) {
+      const svgW = svgEl.clientWidth  || 375;
+      const svgH = svgEl.clientHeight || 600;
+      // Gather node + all connected nodes to compute bounding box
+      const focusIds = new Set([id, ...connectedIds]);
+      const focusNodes = graphData.nodes.filter(n => focusIds.has(n.id));
+      const xs = focusNodes.map(n => n.x || 0);
+      const ys = focusNodes.map(n => n.y || 0);
+      const minX = Math.min(...xs) - 60, maxX = Math.max(...xs) + 60;
+      const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 60;
+      const scale = Math.min(
+        (svgW - 40) / (maxX - minX || 1),
+        (svgH * 0.55 - 40) / (maxY - minY || 1), // leave room for bottom panel
+        3
+      );
+      const tx = svgW / 2 - scale * ((minX + maxX) / 2);
+      const ty = svgH * 0.27 - scale * ((minY + maxY) / 2);
+      svgSel.transition().duration(450)
+        .call(zoomBehaviour.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+    }
+    showMobileFocusBackBtn(true);
+  }
+
   showInfoPanel(id);
 }
 
@@ -1250,12 +1286,32 @@ function deselectNode() {
   nodesLayer.selectAll('.node-g').classed('selected connected faded', false);
   linksLayer.selectAll('.link-g').classed('link-active link-faded', false);
   document.getElementById('info-panel').style.display = 'none';
+  // Mobile: exit focus mode and restore full chart view
+  if (window.innerWidth <= 768 && _mobileFocusActive) {
+    _mobileFocusActive = false;
+    showMobileFocusBackBtn(false);
+    fitView();
+  }
   // Restore trace highlight if one is active
   if (activeTracePath !== null) {
     const p1Id = document.getElementById('trace-p1').value;
     const p2Id = document.getElementById('trace-p2').value;
     applyTraceHighlight(activeTracePath, p1Id, p2Id);
   }
+}
+
+/** Show or hide the mobile "← Back to full chart" button */
+function showMobileFocusBackBtn(show) {
+  let btn = document.getElementById('mobile-focus-back');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'mobile-focus-back';
+    btn.className = 'mobile-focus-back';
+    btn.innerHTML = '← Full chart';
+    btn.onclick = () => deselectNode();
+    document.getElementById('app').appendChild(btn);
+  }
+  btn.style.display = show ? 'flex' : 'none';
 }
 
 /* ────────────────────────────────────────────────────────────
