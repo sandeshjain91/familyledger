@@ -33,6 +33,7 @@ let selectedLinkId    = null;   // currently selected link id
 let activeTracePath   = null;   // array of path steps when trace is active
 let currentSuggestions  = [];   // suggestions computed by generateSuggestions()
 let pickMode            = null; // { field: 'rel-p1'|'rel-p2'|'trace-p1'|'trace-p2', label } when active
+let _nodeTapped         = false; // guard against mobile ghost-click on SVG background
 
 // Graph data (kept in sync via onSnapshot)
 const graphData = {
@@ -574,7 +575,9 @@ function initGraph() {
   svgSel.on('dblclick.zoom', null);
 
   // Deselect node/link on background click; also cancel pick mode
+  // _nodeTapped guard prevents mobile ghost-click from instantly closing the info panel
   svgSel.on('click', () => {
+    if (_nodeTapped) return;
     if (pickMode) { exitPickMode(); return; }
     deselectNode();
     deselectLink();
@@ -707,6 +710,8 @@ function updateGraph() {
     )
     .on('click', (event, d) => {
       event.stopPropagation();
+      _nodeTapped = true;
+      setTimeout(() => { _nodeTapped = false; }, 350);
       selectNode(d.id);
     });
 
