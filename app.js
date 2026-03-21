@@ -34,6 +34,7 @@ let activeTracePath   = null;   // array of path steps when trace is active
 let currentSuggestions  = [];   // suggestions computed by generateSuggestions()
 let pickMode            = null; // { field: 'rel-p1'|'rel-p2'|'trace-p1'|'trace-p2', label } when active
 let _nodeTapped         = false; // guard against mobile ghost-click on SVG background
+let _nodeTapTimer       = null;  // timer handle for clearing _nodeTapped
 
 // Graph data (kept in sync via onSnapshot)
 const graphData = {
@@ -575,9 +576,11 @@ function initGraph() {
   svgSel.on('dblclick.zoom', null);
 
   // Deselect node/link on background click; also cancel pick mode
-  // _nodeTapped guard prevents mobile ghost-click from instantly closing the info panel
-  svgSel.on('click', () => {
+  // _nodeTapped guard + target check prevent mobile ghost-click from closing info panel
+  svgSel.on('click', (event) => {
     if (_nodeTapped) return;
+    // If the click landed inside a node or link, ignore (stopPropagation may have been missed)
+    if (event.target && event.target.closest && event.target.closest('.node-g')) return;
     if (pickMode) { exitPickMode(); return; }
     deselectNode();
     deselectLink();
@@ -708,10 +711,19 @@ function updateGraph() {
         .on('drag',  onDrag)
         .on('end',   onDragEnd)
     )
+    .on('touchstart', (event, d) => {
+      // Set guard immediately on touch so the 300ms ghost click can't close the panel
+      event.stopPropagation();
+      _nodeTapped = true;
+      clearTimeout(_nodeTapTimer);
+      _nodeTapTimer = setTimeout(() => { _nodeTapped = false; }, 600);
+      selectNode(d.id);
+    }, { passive: false })
     .on('click', (event, d) => {
       event.stopPropagation();
       _nodeTapped = true;
-      setTimeout(() => { _nodeTapped = false; }, 350);
+      clearTimeout(_nodeTapTimer);
+      _nodeTapTimer = setTimeout(() => { _nodeTapped = false; }, 600);
       selectNode(d.id);
     });
 
