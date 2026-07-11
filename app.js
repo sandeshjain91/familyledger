@@ -118,9 +118,14 @@ async function register() {
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     const uid  = cred.user.uid;
 
-    // Determine role: admin if email matches ADMIN_EMAIL constant or if no users exist yet
-    const usersSnap = await db.collection('users').limit(1).get();
-    const isFirst   = usersSnap.empty;
+    // Determine role: admin if email matches ADMIN_EMAIL constant or if no users exist yet.
+    // Security rules only let admins list users, so this probe fails for
+    // normal registrations once an admin exists — treat that as "not first".
+    let isFirst = false;
+    try {
+      const usersSnap = await db.collection('users').limit(1).get();
+      isFirst = usersSnap.empty;
+    } catch (_) { /* permission denied ⇒ users exist and rules are live */ }
     const isAdmin   = isFirst || (typeof ADMIN_EMAIL !== 'undefined' && email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
 
     await db.collection('users').doc(uid).set({
@@ -224,7 +229,7 @@ function friendlyAuthError(code) {
     'auth/too-many-requests': 'Too many attempts. Please try again later.',
     'auth/invalid-credential': 'Invalid email or password.'
   };
-  return map[code] || 'Something went wrong. Please try again.';
+  return map[code] || 'Something went wrong. Please try again.' + (code ? ' (' + code + ')' : '');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -287,11 +292,18 @@ function startListeners() {
     });
 
     nodeById = new Map(graphData.nodes.map(n => [n.id, n]));
-    updatePeoplePanel();
-    refreshPersonSelects();
 
+    // Mark ready & clear the spinner BEFORE any rendering that could throw —
+    // a single malformed document must not leave the app stuck on "Loading…"
     _nodesReady = true;
     if (_linksReady) { setLoading(false); updateGraph(); }
+
+    try {
+      updatePeoplePanel();
+      refreshPersonSelects();
+    } catch (err) {
+      console.error('people panel render:', err);
+    }
   }, (err) => { console.error('nodes listener:', err); setLoading(false); });
 
   // ── relationships ───────────────────────────────────────
@@ -1815,13 +1827,13 @@ function updatePeoplePanel() {
 function filterPeople() {
   const q = document.getElementById('search-input').value.toLowerCase();
   renderPeopleList(q
-    ? graphData.nodes.filter(n => n.name.toLowerCase().includes(q))
+    ? graphData.nodes.filter(n => (n.name || '').toLowerCase().includes(q))
     : graphData.nodes
   );
 }
 
 function renderPeopleList(nodes) {
-  const sorted = [...nodes].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...nodes].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const html = sorted.length
     ? sorted.map(n => `
         <div class="person-row" onclick="centreOnNode('${n.id}')">
@@ -1929,10 +1941,10 @@ function _ppShowDrop(wrap, query) {
   if (hid?.id === 'ql-other-person' && _quickLinkPersonId) {
     nodes = nodes.filter(n => n.id !== _quickLinkPersonId);
   }
-  nodes.sort((a, b) => a.name.localeCompare(b.name));
+  nodes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   const q       = (query || '').toLowerCase().trim();
-  const matches = q ? nodes.filter(n => n.name.toLowerCase().includes(q)) : nodes;
+  const matches = q ? nodes.filter(n => (n.name || '').toLowerCase().includes(q)) : nodes;
 
   if (!matches.length) {
     drop.innerHTML = '<div class="pp-empty">No matches</div>';

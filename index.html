@@ -29,7 +29,8 @@
       <label>Email</label>
       <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" />
       <label>Password</label>
-      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')login()" />
       <button class="btn-primary" onclick="login()">Sign In</button>
     </div>
 
@@ -40,7 +41,8 @@
       <label>Email</label>
       <input type="email" id="reg-email" placeholder="you@example.com" autocomplete="email" />
       <label>Password</label>
-      <input type="password" id="reg-password" placeholder="Min. 6 characters" autocomplete="new-password" />
+      <input type="password" id="reg-password" placeholder="Min. 6 characters" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter')register()" />
       <button class="btn-primary" onclick="register()">Create Account</button>
     </div>
 

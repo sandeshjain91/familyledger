@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd /Users/drsandesh/Documents/GitHub/familyledger && exec /usr/bin/python3 -m http.server 8642"],
+      "port": 8642
+    }
+  ]
+}

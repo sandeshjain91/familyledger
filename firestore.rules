@@ -1,0 +1,60 @@
+rules_version = '2';
+
+// Security rules for the Global Pedigree Chart.
+// Mirrors the app's permission model:
+//   - anyone may register, but starts as role 'user', unapproved
+//   - only the designated admin email may self-assign the admin role
+//   - only approved users may read or write chart data
+//   - people (nodes) may be edited/deleted by their creator or an admin
+//   - the activity log is append-only and admin-readable
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isAdmin() {
+      return signedIn() && me().role == 'admin';
+    }
+    function isApproved() {
+      return signedIn() && me().approved == true;
+    }
+
+    match /users/{uid} {
+      // Registration: users may only create their own profile document.
+      // Self-assigning admin/approved is only allowed for the designated
+      // admin email, verified by Firebase Auth (not client-supplied data).
+      allow create: if signedIn() && request.auth.uid == uid && (
+        (request.resource.data.role == 'user' && request.resource.data.approved == false) ||
+        request.auth.token.email == 'sandeshjain91@gmail.com'
+      );
+      // Users see their own profile; admins see everyone (user management).
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      // Only admins may approve users or change roles.
+      allow update, delete: if isAdmin();
+    }
+
+    match /nodes/{id} {
+      allow read: if isApproved();
+      allow create: if isApproved() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isApproved() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    match /relationships/{id} {
+      allow read, create: if isApproved();
+      // Any approved user may modify/delete links: deleting a person cascades
+      // deletes of links created by other users, so owner-only would break it.
+      // The UI still restricts manual link removal to owner/admin.
+      allow update, delete: if isApproved();
+    }
+
+    match /activityLogs/{id} {
+      allow create: if isApproved();
+      allow read: if isAdmin();
+      allow update, delete: if false; // append-only
+    }
+  }
+}
